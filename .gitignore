@@ -1,0 +1,7 @@
+/target/
+/.tools/
+/test-data/
+*.sqlite*
+
+
+*.lnk

@@ -1,0 +1,27 @@
+[package]
+name = "good-search"
+version = "0.1.0"
+edition = "2021"
+default-run = "good-search"
+
+[dependencies]
+anyhow = "1"
+raw-window-handle = "0.6"
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "clipboard"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+notify = "8"
+globset = "0.4"
+walkdir = "2"
+serde = { version = "1", features = ["derive"] }
+toml = "1.2"
+blake3 = "1.8.7"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+strip = true

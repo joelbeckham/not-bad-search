@@ -1,0 +1,168 @@
+use anyhow::{bail, Result};
+use eframe::egui;
+use std::sync::mpsc;
+use windows_sys::Win32::{
+    Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, HWND, LPARAM},
+    System::Threading::*,
+    UI::{Input::KeyboardAndMouse::*, WindowsAndMessaging::*},
+};
+
+/// One window per Windows-local data directory. Isolated test profiles can coexist.
+pub struct Instance {
+    mutex: HANDLE,
+    property: Vec<u16>,
+}
+impl Instance {
+    pub fn claim(data: &std::path::Path) -> Result<Option<Self>> {
+        let canonical = std::fs::canonicalize(data)?;
+        let hash = canonical
+            .to_string_lossy()
+            .to_lowercase()
+            .bytes()
+            .fold(0xcbf29ce484222325u64, |h, b| {
+                (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
+            });
+        let property: Vec<u16> = format!("GoodSearch.Window.{hash:016x}\0")
+            .encode_utf16()
+            .collect();
+        let name: Vec<u16> = format!("Local\\GoodSearch.Instance.{hash:016x}\0")
+            .encode_utf16()
+            .collect();
+        unsafe {
+            let mutex = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
+            if mutex.is_null() {
+                bail!(
+                    "Cannot create app instance guard: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+            if GetLastError() == ERROR_ALREADY_EXISTS {
+                CloseHandle(mutex);
+                let mut lookup = Lookup {
+                    property: property.as_ptr(),
+                    window: std::ptr::null_mut(),
+                };
+                for _ in 0..40 {
+                    EnumWindows(Some(find_instance), &mut lookup as *mut Lookup as LPARAM);
+                    if !lookup.window.is_null() {
+                        ShowWindowAsync(lookup.window, SW_RESTORE);
+                        SetForegroundWindow(lookup.window);
+                        return Ok(None);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                bail!("Good Search is already starting. Please try opening it again shortly.");
+            }
+            Ok(Some(Self { mutex, property }))
+        }
+    }
+    pub fn attach(&self, window: isize) -> Result<()> {
+        if unsafe { SetPropW(window as HWND, self.property.as_ptr(), 1usize as HANDLE) } == 0 {
+            bail!(
+                "Cannot register app window: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        Ok(())
+    }
+}
+struct Lookup {
+    property: *const u16,
+    window: HWND,
+}
+unsafe extern "system" fn find_instance(window: HWND, param: LPARAM) -> windows_sys::core::BOOL {
+    let lookup = &mut *(param as *mut Lookup);
+    if !GetPropW(window, lookup.property).is_null() {
+        lookup.window = window;
+        return 0;
+    }
+    1
+}
+impl Drop for Instance {
+    fn drop(&mut self) {
+        unsafe {
+            CloseHandle(self.mutex);
+        }
+    }
+}
+
+pub fn background_priority() -> Result<()> {
+    // Windows background mode lowers CPU, I/O and memory scheduling priority for this thread.
+    if unsafe { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) } == 0 {
+        bail!(
+            "Cannot lower indexing priority: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    Ok(())
+}
+
+pub struct Hotkey {
+    thread: u32,
+}
+impl Hotkey {
+    pub fn register(ctx: egui::Context, window: isize) -> Result<Self> {
+        let (tx, rx) = mpsc::sync_channel(1);
+        std::thread::spawn(move || unsafe {
+            if RegisterHotKey(
+                std::ptr::null_mut(),
+                1,
+                MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
+                0x20,
+            ) == 0
+            {
+                let _ = tx.send(Err(anyhow::anyhow!(
+                    "Ctrl+Alt+Space is unavailable: {}",
+                    std::io::Error::last_os_error()
+                )));
+                return;
+            }
+            let _ = tx.send(Ok(GetCurrentThreadId()));
+            let mut msg = std::mem::zeroed();
+            while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                if msg.message == WM_HOTKEY {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    let hwnd = window as windows_sys::Win32::Foundation::HWND;
+                    if !hwnd.is_null() {
+                        ShowWindow(hwnd, SW_RESTORE);
+                        SetForegroundWindow(hwnd);
+                    }
+                    ctx.request_repaint();
+                }
+            }
+            UnregisterHotKey(std::ptr::null_mut(), 1);
+        });
+        Ok(Self {
+            thread: rx.recv()??,
+        })
+    }
+}
+impl Drop for Hotkey {
+    fn drop(&mut self) {
+        unsafe {
+            PostThreadMessageW(self.thread, WM_QUIT, 0, 0);
+        }
+    }
+}
+
+pub fn open_file(path: &str) -> Result<()> {
+    let wide: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
+    let result = unsafe {
+        windows_sys::Win32::UI::Shell::ShellExecuteW(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            wide.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if result as isize <= 32 {
+        bail!(
+            "Windows could not open this file (code {})",
+            result as isize
+        );
+    }
+    Ok(())
+}
