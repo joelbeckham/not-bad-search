@@ -109,7 +109,35 @@ pub struct Hit {
     pub snippet: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct SearchFilters {
+    pub text: bool,
+    pub images: bool,
+    pub semantic: bool,
+    pub text_matches: bool,
+}
+impl Default for SearchFilters {
+    fn default() -> Self {
+        Self {
+            text: true,
+            images: true,
+            semantic: true,
+            text_matches: true,
+        }
+    }
+}
 pub fn search(db: &Connection, query: &str, limit: usize) -> Result<Vec<Hit>> {
+    search_filtered(db, query, limit, SearchFilters::default())
+}
+pub fn search_filtered(
+    db: &Connection,
+    query: &str,
+    limit: usize,
+    options: SearchFilters,
+) -> Result<Vec<Hit>> {
+    if !options.text_matches {
+        return Ok(vec![]);
+    }
     let terms = query::terms(query);
     if terms.is_empty() || limit == 0 {
         return Ok(vec![]);
@@ -165,7 +193,7 @@ pub fn search(db: &Connection, query: &str, limit: usize) -> Result<Vec<Hit>> {
         })
     })?;
     let mut hits: Vec<Hit> = rows.collect::<rusqlite::Result<_>>()?;
-    content::search_content(db, &terms, limit.min(200), &mut hits)?;
+    content::search_content(db, &terms, limit.min(200), &mut hits, options)?;
     Ok(hits)
 }
 

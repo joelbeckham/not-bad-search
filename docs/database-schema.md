@@ -51,7 +51,7 @@ Filename/content publication is separate; content becomes available progressivel
 ## Connections
 
 - Startup open_db: WAL and migrations before workers start.
-- Index open_writer: five-second busy timeout, synchronous=NORMAL.
+- Index open_writer: five-second busy timeout, synchronous=NORMAL. Explicit writer transactions use BEGIN IMMEDIATE so concurrent workers wait before reading a transaction snapshot, avoiding deferred read-to-write upgrade failures (SQLITE_BUSY_SNAPSHOT). Read-only inspection transactions remain deferred.
 - Search open_reader: SQLite read-only flags, query_only=ON, 100 ms busy timeout, no DDL.
 - Every connection enables foreign_keys=ON.
 

@@ -162,14 +162,15 @@ pub(crate) fn search_content(
     terms: &[String],
     limit: usize,
     hits: &mut Vec<Hit>,
+    filters: crate::SearchFilters,
 ) -> Result<()> {
     if hits.len() >= limit || !terms.iter().any(|s| s.chars().any(char::is_alphanumeric)) {
         return Ok(());
     }
     // AND literal terms and quoted phrases; never expose raw FTS syntax.
     let pattern = crate::query::fts(terms);
-    let mut stmt = db.prepare("SELECT f.path,f.name,snippet(chunk_search,1,'[',']',' ... ',24),c.start_line,d.kind FROM chunk_search JOIN chunks c ON c.id=chunk_search.rowid JOIN documents d ON d.id=c.document_id JOIN files f ON f.id=d.file_id WHERE chunk_search MATCH ?1 ORDER BY rank LIMIT 1000")?;
-    let mut rows = stmt.query([pattern])?;
+    let mut stmt = db.prepare("SELECT f.path,f.name,snippet(chunk_search,1,'[',']',' ... ',24),c.start_line,d.kind FROM chunk_search JOIN chunks c ON c.id=chunk_search.rowid JOIN documents d ON d.id=c.document_id JOIN files f ON f.id=d.file_id WHERE chunk_search MATCH ?1 AND ((d.kind='text' AND ?2) OR (d.kind IN ('image_text','image_description') AND ?3)) ORDER BY rank LIMIT 1000")?;
+    let mut rows = stmt.query(params![pattern, filters.text, filters.images])?;
     let mut seen: HashSet<String> = hits.iter().map(|h| h.path.clone()).collect();
     while let Some(row) = rows.next()? {
         let path: String = row.get(0)?;

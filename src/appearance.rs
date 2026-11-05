@@ -223,19 +223,25 @@ impl App {
                         .wrap(),
                     );
                 }
+                if !self.index_error.is_empty() {
+                    ui.colored_label(Color32::from_rgb(226, 177, 112), &self.index_error);
+                }
+                let mut filters_changed = false;
                 ui.horizontal(|ui| {
-                    ui.add_space(12.);
-                    ui.label(
-                        RichText::new(if self.searching {
-                            "Searching…"
-                        } else if self.semantic_pending || self.semantic_due.is_some() {
-                            "Finding related results..."
-                        } else {
-                            "Files"
-                        })
-                        .size(12.)
-                        .color(MUTED),
-                    );
+                    ui.add_space(8.);
+                    for (value, label, help) in [
+                        (&mut self.filters.text, "Text", "Search the contents of text files"),
+                        (&mut self.filters.images, "Images", "Search extracted image text and descriptions"),
+                    ] {
+                        if ui.selectable_label(*value, label).on_hover_text(help).clicked() { *value = !*value; filters_changed=true; }
+                    }
+                    ui.separator();
+                    for (value, label, help) in [
+                        (&mut self.filters.semantic, "Semantic", "Include related content using local embeddings (requires semantic search enabled in Settings)"),
+                        (&mut self.filters.text_matches, "Text matches", "Include filename matches and literal matches in enabled content types"),
+                    ] {
+                        if ui.selectable_label(*value, label).on_hover_text(help).clicked() { *value = !*value; filters_changed=true; }
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add_space(12.);
                         ui.label(
@@ -254,6 +260,7 @@ impl App {
                         ));
                     });
                 });
+                if filters_changed { self.hits.clear(); self.submit(); self.focus=true; }
                 ui.add_space(4.);
                 let moved = ctx.input(|i| {
                     i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::ArrowUp)
@@ -556,6 +563,9 @@ impl App {
                         }
                         if !self.error.is_empty() {
                             ui.colored_label(Color32::from_rgb(226, 177, 112), &self.error);
+                        }
+                        if !self.index_error.is_empty() {
+                            ui.colored_label(Color32::from_rgb(226, 177, 112), &self.index_error);
                         }
                         ui.label(RichText::new(&self.status).size(11.).color(MUTED));
                     });

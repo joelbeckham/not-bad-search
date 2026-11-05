@@ -122,7 +122,7 @@ pub fn index_batch(db: &mut Connection, model: &impl Embedder, limit: usize) -> 
 
 #[derive(Default)]
 pub struct VectorIndex {
-    entries: Vec<(i64, i64, String, Vec<f32>)>,
+    entries: Vec<(i64, i64, String, Vec<f32>, bool)>,
     data_version: Option<i64>,
 }
 impl VectorIndex {
@@ -137,11 +137,11 @@ impl VectorIndex {
         if self.data_version == Some(version) {
             return Ok(());
         }
-        let rows: Vec<(i64,i64,String,Vec<u8>)>=db.prepare("SELECT e.chunk_id,d.file_id,e.content_hash,e.vector FROM embeddings e JOIN chunks c ON c.id=e.chunk_id AND c.content_hash=e.content_hash JOIN documents d ON d.id=c.document_id WHERE e.model=?1 AND e.dimensions=?2 AND d.status='ready'")?
-            .query_map(params![MODEL,DIMENSIONS as i64],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
+        let rows: Vec<(i64,i64,String,Vec<u8>,bool)>=db.prepare("SELECT e.chunk_id,d.file_id,e.content_hash,e.vector,d.kind='text' FROM embeddings e JOIN chunks c ON c.id=e.chunk_id AND c.content_hash=e.content_hash JOIN documents d ON d.id=c.document_id WHERE e.model=?1 AND e.dimensions=?2 AND d.status='ready'")?
+            .query_map(params![MODEL,DIMENSIONS as i64],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?.collect::<rusqlite::Result<_>>()?;
         let entries = rows
             .into_iter()
-            .map(|(id, file, hash, blob)| Ok((id, file, hash, decode(&blob)?)))
+            .map(|(id, file, hash, blob, text)| Ok((id, file, hash, decode(&blob)?, text)))
             .collect::<Result<_>>()?;
         self.entries = entries;
         self.data_version = Some(version);
@@ -150,13 +150,28 @@ impl VectorIndex {
     pub fn invalidate(&mut self) {
         self.data_version = None;
     }
-    pub fn search(&self, db: &Connection, mut query: Vec<f32>, limit: usize) -> Result<Vec<Hit>> {
+    pub fn search(&self, db: &Connection, query: Vec<f32>, limit: usize) -> Result<Vec<Hit>> {
+        self.search_filtered(db, query, limit, crate::SearchFilters::default())
+    }
+    pub fn search_filtered(
+        &self,
+        db: &Connection,
+        mut query: Vec<f32>,
+        limit: usize,
+        filters: crate::SearchFilters,
+    ) -> Result<Vec<Hit>> {
+        if !filters.semantic {
+            return Ok(vec![]);
+        }
         normalize(&mut query)?;
         if limit == 0 || query.iter().all(|v| *v == 0.) {
             return Ok(vec![]);
         }
         let mut best: HashMap<i64, (i64, f32, &str)> = HashMap::new();
-        for (id, file, hash, v) in &self.entries {
+        for (id, file, hash, v, text) in &self.entries {
+            if (*text && !filters.text) || (!*text && !filters.images) {
+                continue;
+            }
             let score: f32 = v.iter().zip(&query).map(|(a, b)| a * b).sum();
             if score >= 0.35 && best.get(file).is_none_or(|(_, old, _)| score > *old) {
                 best.insert(*file, (*id, score, hash));

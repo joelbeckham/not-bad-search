@@ -9,12 +9,12 @@ use std::{
 };
 
 pub(super) struct Worker {
-    pending: Arc<Mutex<Option<(u64, String)>>>,
+    pending: Arc<Mutex<Option<(u64, String, good_search::SearchFilters)>>>,
     wake: mpsc::SyncSender<()>,
 }
 impl Worker {
-    pub fn request(&self, id: u64, query: String) {
-        *self.pending.lock().unwrap() = Some((id, query));
+    pub fn request(&self, id: u64, query: String, filters: good_search::SearchFilters) {
+        *self.pending.lock().unwrap() = Some((id, query, filters));
         self.wake();
     }
     pub fn cancel(&self) {
@@ -29,7 +29,9 @@ impl Worker {
         events: mpsc::Sender<Event>,
         ctx: egui::Context,
     ) -> Self {
-        let pending = Arc::new(Mutex::new(None::<(u64, String)>));
+        let pending = Arc::new(Mutex::new(
+            None::<(u64, String, good_search::SearchFilters)>,
+        ));
         let work = pending.clone();
         let (wake, rx) = mpsc::sync_channel(1);
         std::thread::spawn(move || {
@@ -89,7 +91,7 @@ impl Worker {
                     if enabled {
                         if let Some(model) = &model {
                             let request = work.lock().unwrap().take();
-                            if let Some((id, query)) = request {
+                            if let Some((id, query, filters)) = request {
                                 let start = Instant::now();
                                 let result = (|| -> anyhow::Result<_> {
                                     index.refresh(&reader)?;
@@ -105,7 +107,7 @@ impl Worker {
                                         }
                                         vector
                                     };
-                                    index.search(&reader, vector, 100)
+                                    index.search_filtered(&reader, vector, 100, filters)
                                 })();
                                 let result = result.map_err(|e| format!("{e:#}"));
                                 let _ = events.send(Event::SemanticResults(

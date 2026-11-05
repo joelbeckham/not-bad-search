@@ -137,6 +137,116 @@ fn hybrid_ranking_protects_exact_names_quotes_and_deduplicates() {
 }
 
 #[test]
+fn source_and_match_filters_apply_before_ranking() -> Result<()> {
+    use good_search::{search_filtered, SearchFilters};
+    let mut db = open_db(std::path::Path::new(":memory:"))?;
+    fixture(&db)?;
+    db.execute_batch(
+        "INSERT INTO files VALUES(2,'root','C:/photo.png','photo.png','photo.png');
+    INSERT INTO documents VALUES(2,2,'image_description','image',1,1,'ready','');
+    INSERT INTO chunks VALUES(3,2,0,'',1,'a dog outside','hash3');
+    INSERT INTO files VALUES(3,'root','C:/dog.bin','dog.bin','dog.bin');",
+    )?;
+    let all = SearchFilters::default();
+    assert_eq!(search_filtered(&db, "dog", 100, all)?.len(), 3);
+    assert_eq!(
+        search_filtered(
+            &db,
+            "dog",
+            100,
+            SearchFilters {
+                images: false,
+                ..all
+            }
+        )?
+        .len(),
+        2
+    );
+    assert_eq!(
+        search_filtered(&db, "dog", 100, SearchFilters { text: false, ..all })?.len(),
+        2
+    );
+    let names = search_filtered(
+        &db,
+        "dog",
+        100,
+        SearchFilters {
+            text: false,
+            images: false,
+            ..all
+        },
+    )?;
+    assert_eq!(names.len(), 1);
+    assert_eq!(names[0].name, "dog.bin");
+    assert!(search_filtered(
+        &db,
+        "dog",
+        100,
+        SearchFilters {
+            text_matches: false,
+            ..all
+        }
+    )?
+    .is_empty());
+    semantic::index_batch(&mut db, &Fake, 32)?;
+    let mut index = VectorIndex::default();
+    index.refresh(&db)?;
+    assert_eq!(index.search_filtered(&db, vector(), 100, all)?.len(), 2);
+    let text = index.search_filtered(
+        &db,
+        vector(),
+        100,
+        SearchFilters {
+            images: false,
+            ..all
+        },
+    )?;
+    assert_eq!(text.len(), 1);
+    assert_eq!(text[0].name, "one.md");
+    let images = index.search_filtered(&db, vector(), 100, SearchFilters { text: false, ..all })?;
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].name, "photo.png");
+    assert!(index
+        .search_filtered(
+            &db,
+            vector(),
+            100,
+            SearchFilters {
+                semantic: false,
+                ..all
+            }
+        )?
+        .is_empty());
+    assert!(index
+        .search_filtered(
+            &db,
+            vector(),
+            100,
+            SearchFilters {
+                text: false,
+                images: false,
+                ..all
+            }
+        )?
+        .is_empty());
+    assert_eq!(
+        index
+            .search_filtered(
+                &db,
+                vector(),
+                100,
+                SearchFilters {
+                    text_matches: false,
+                    ..all
+                }
+            )?
+            .len(),
+        2
+    );
+    Ok(())
+}
+
+#[test]
 fn migration_v2_preserves_extracted_documents() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let path = temp.path().join("index.sqlite");

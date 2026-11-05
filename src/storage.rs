@@ -1,10 +1,14 @@
 use anyhow::{bail, Result};
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, TransactionBehavior};
 use std::{path::Path, time::Duration};
 
 pub fn open_writer(path: &Path) -> Result<Connection> {
-    let db = Connection::open(path)?;
+    let mut db = Connection::open(path)?;
     db.busy_timeout(Duration::from_secs(5))?;
+    // Reserve the writer before reading a transaction snapshot. A deferred
+    // read-to-write upgrade can fail with SQLITE_BUSY_SNAPSHOT immediately,
+    // bypassing busy_timeout when another indexing worker commits in between.
+    db.set_transaction_behavior(TransactionBehavior::Immediate);
     db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL;")?;
     Ok(db)
 }

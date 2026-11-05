@@ -6,7 +6,9 @@ mod preview_ui;
 mod semantic_worker;
 use anyhow::{Context, Result};
 use eframe::egui;
-use good_search::{open_db, open_reader, open_writer, reconcile, search, Config, Hit};
+use good_search::{
+    open_db, open_reader, open_writer, reconcile, search_filtered, Config, Hit, SearchFilters,
+};
 use notify::Watcher;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::{
@@ -22,6 +24,7 @@ enum Event {
     SearchFailed(u64, String),
     Status(String),
     Error(String),
+    IndexError(String),
     ImageStatus(String, bool),
 }
 fn trace(path: &std::path::Path, message: &str) {
@@ -37,6 +40,7 @@ fn trace(path: &std::path::Path, message: &str) {
     }
 }
 struct App {
+    filters: SearchFilters,
     semantic: semantic_worker::Worker,
     semantic_status: String,
     semantic_ready: bool,
@@ -58,7 +62,7 @@ struct App {
     selected: usize,
     generation: u64,
     elapsed: Duration,
-    pending: Arc<Mutex<Option<(u64, String)>>>,
+    pending: Arc<Mutex<Option<(u64, String, SearchFilters)>>>,
     wake: mpsc::SyncSender<()>,
     events: mpsc::Receiver<Event>,
     config: Config,
@@ -74,6 +78,7 @@ struct App {
     settings: bool,
     status: String,
     error: String,
+    index_error: String,
     index_wake: mpsc::SyncSender<()>,
     shared_config: Arc<Mutex<Config>>,
     _hotkey: Option<platform::Hotkey>,
@@ -189,16 +194,16 @@ fn run() -> Result<()> {
     eframe::run_native("Good Search",options,Box::new(move |cc| {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         let (tx,events)=mpsc::channel();
-        let pending=Arc::new(Mutex::new(None::<(u64,String)>));
+        let pending=Arc::new(Mutex::new(None::<(u64,String,SearchFilters)>));
         let (wake,rx)=mpsc::sync_channel(1);
         let p=pending.clone(); let sender=tx.clone(); let context=cc.egui_ctx.clone(); let path=db_path.clone();
         std::thread::spawn(move || {
             let db=match open_reader(&path) {Ok(db)=>db,Err(e)=>{let _=sender.send(Event::Error(e.to_string()));context.request_repaint();return}};
             while rx.recv().is_ok() {
                 let job=p.lock().unwrap().take();
-                if let Some((id,q))=job {
+                if let Some((id,q,filters))=job {
                     let start=Instant::now();
-                    let event=match search(&db,&q,100) {Ok(hits)=>Event::Results(id,q.clone(),hits,start.elapsed()),Err(e)=>Event::SearchFailed(id,e.to_string())};
+                    let event=match search_filtered(&db,&q,100,filters) {Ok(hits)=>Event::Results(id,q.clone(),hits,start.elapsed()),Err(e)=>Event::SearchFailed(id,e.to_string())};
                     let _=sender.send(event); context.request_repaint();
                     trace(&path.with_file_name("worker-trace.log"),&format!("completed id={id} query={q:?} elapsed={:?}",start.elapsed()));
                 }
@@ -237,9 +242,9 @@ fn run() -> Result<()> {
                     Ok(errors)=>{
                         let count:i64=db.query_row("SELECT count(*) FROM files",[],|r|r.get(0)).unwrap_or(0);
                         let _=tx.send(Event::Status(format!("{count} files · indexed in {:.0} ms",start.elapsed().as_secs_f64()*1000.)));
-                        if !errors.is_empty() { let _=tx.send(Event::Error(errors.join("\n"))); }
+                        let _=tx.send(Event::IndexError(errors.join("\n")));
                     },
-                    Err(e)=>{let _=tx.send(Event::Error(e.to_string()));}
+                    Err(e)=>{let _=tx.send(Event::IndexError(format!("Indexing: {e}. Will retry.")));}
                 }
                 context.request_repaint();
                 let _=image_notify.try_send(false);
@@ -253,7 +258,7 @@ fn run() -> Result<()> {
         instance.attach(window)?;
         platform::center_window(window);
         let (hotkey,error)=match platform::Hotkey::register(cc.egui_ctx.clone(),window) {Ok(h)=>(Some(h),String::new()),Err(e)=>(None,e.to_string())};
-        Ok(Box::new(App {semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,folders:config.folders.iter().map(|p|p.to_string_lossy()).collect::<Vec<_>>().join("\n"), exclusions:config.exclusions.join("\n"), image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.folders.is_empty(), content_folders:config.content_folders.clone(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
+        Ok(Box::new(App {index_error:String::new(),filters:SearchFilters::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,folders:config.folders.iter().map(|p|p.to_string_lossy()).collect::<Vec<_>>().join("\n"), exclusions:config.exclusions.join("\n"), image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.folders.is_empty(), content_folders:config.content_folders.clone(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
     })).map_err(|e|anyhow::anyhow!(e.to_string()))?;
     Ok(())
 }
@@ -281,6 +286,8 @@ impl App {
         self.lexical_hits.clear();
         self.semantic_pending = false;
         self.semantic_due = if self.config.semantic_enabled
+            && self.filters.semantic
+            && (self.filters.text || self.filters.images)
             && self.semantic_ready
             && self.query.trim().chars().count() >= 3
         {
@@ -307,7 +314,7 @@ impl App {
             &self.config_path.with_file_name("worker-trace.log"),
             &format!("submitted id={} query={:?}", self.generation, self.query),
         );
-        *self.pending.lock().unwrap() = Some((self.generation, self.query.clone()));
+        *self.pending.lock().unwrap() = Some((self.generation, self.query.clone(), self.filters));
         if matches!(
             self.wake.try_send(()),
             Err(mpsc::TrySendError::Disconnected(_))
@@ -388,6 +395,7 @@ impl eframe::App for App {
                     }
                 }
                 Event::Error(e) => self.error = e,
+                Event::IndexError(e) => self.index_error = e,
                 Event::ImageStatus(status, changed) => {
                     self.image_status = status;
                     if changed {
@@ -414,6 +422,8 @@ impl eframe::App for App {
                     }
                     if changed
                         && self.config.semantic_enabled
+                        && self.filters.semantic
+                        && (self.filters.text || self.filters.images)
                         && self.query.trim().chars().count() >= 3
                         && !self.semantic_pending
                     {
@@ -425,7 +435,9 @@ impl eframe::App for App {
                 Event::SemanticResults(id, query, result, time)
                     if id == self.generation
                         && query == self.query
-                        && self.config.semantic_enabled =>
+                        && self.config.semantic_enabled
+                        && self.filters.semantic
+                        && (self.filters.text || self.filters.images) =>
                 {
                     self.semantic_pending = false;
                     match result {
@@ -492,7 +504,8 @@ impl eframe::App for App {
             if Instant::now() >= due {
                 self.semantic_due = None;
                 self.semantic_pending = true;
-                self.semantic.request(self.generation, self.query.clone());
+                self.semantic
+                    .request(self.generation, self.query.clone(), self.filters);
             } else {
                 ctx.request_repaint_after(due.saturating_duration_since(Instant::now()));
             }
