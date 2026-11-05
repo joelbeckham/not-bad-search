@@ -41,6 +41,7 @@ fn trace(path: &std::path::Path, message: &str) {
 }
 struct App {
     filters: SearchFilters,
+    background_refresh: bool,
     semantic: semantic_worker::Worker,
     semantic_status: String,
     semantic_ready: bool,
@@ -259,7 +260,7 @@ fn run() -> Result<()> {
         instance.attach(window)?;
         platform::center_window(window);
         let (hotkey,error)=match platform::Hotkey::register(cc.egui_ctx.clone(),window) {Ok(h)=>(Some(h),String::new()),Err(e)=>(None,e.to_string())};
-        Ok(Box::new(App {index_error:String::new(),filters:SearchFilters::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,folders:config.folders.iter().map(|p|p.to_string_lossy()).collect::<Vec<_>>().join("\n"), exclusions:config.exclusions.join("\n"), image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.folders.is_empty(), content_folders:config.content_folders.clone(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
+        Ok(Box::new(App {background_refresh:false,index_error:String::new(),filters:SearchFilters::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,folders:config.folders.iter().map(|p|p.to_string_lossy()).collect::<Vec<_>>().join("\n"), exclusions:config.exclusions.join("\n"), image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.folders.is_empty(), content_folders:config.content_folders.clone(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
     })).map_err(|e|anyhow::anyhow!(e.to_string()))?;
     Ok(())
 }
@@ -281,7 +282,19 @@ impl App {
         self.focus = !self.settings;
     }
 
+    fn refresh(&mut self) {
+        self.submit();
+        self.background_refresh = !self.query.trim().is_empty();
+    }
+    fn publish_hits(&mut self, hits: Vec<Hit>) {
+        let selected = self.hits.get(self.selected).map(|h| h.path.clone());
+        self.hits = hits;
+        self.selected = selected.and_then(|p| self.hits.iter().position(|h| h.path == p)).unwrap_or(0);
+        self.background_refresh = false;
+        self.trace_results = true;
+    }
     fn submit(&mut self) {
+        self.background_refresh = false;
         self.semantic.cancel();
         self.semantic_hits = None;
         self.lexical_hits.clear();
@@ -376,7 +389,7 @@ impl eframe::App for App {
                         &format!("accepted id={id} hits={}", hits.len()),
                     );
                     self.lexical_hits = hits.clone();
-                    self.hits = if let Some(semantic) = &self.semantic_hits {
+                    let next_hits = if let Some(semantic) = &self.semantic_hits {
                         good_search::semantic::merge(&query, hits, semantic.clone(), 100)
                     } else {
                         hits
@@ -384,15 +397,16 @@ impl eframe::App for App {
                     self.searching = false;
                     self.completed_generation = id;
                     self.elapsed = time;
-                    self.selected = 0;
-                    self.trace_results = true;
+                    if !self.background_refresh || (!self.semantic_pending && self.semantic_due.is_none()) {
+                        self.publish_hits(next_hits);
+                    }
                 }
                 Event::Status(s) => {
                     let done = !s.starts_with("Indexing");
                     self.status = s;
                     if done {
                         self.semantic.wake();
-                        self.submit();
+                        self.refresh();
                     }
                 }
                 Event::Error(e) => self.error = e,
@@ -401,7 +415,7 @@ impl eframe::App for App {
                     self.image_status = status;
                     if changed {
                         self.semantic.wake();
-                        self.submit();
+                        self.refresh();
                     }
                 }
                 Event::SearchFailed(id, error) if id == self.generation => {
@@ -420,6 +434,9 @@ impl eframe::App for App {
                     if !ready {
                         self.semantic_pending = false;
                         self.semantic_due = None;
+                        if self.background_refresh && self.completed_generation == self.generation {
+                            self.publish_hits(self.lexical_hits.clone());
+                        }
                     }
                     if changed
                         && self.config.semantic_enabled
@@ -453,23 +470,22 @@ impl eframe::App for App {
                             );
                             self.semantic_hits = Some(hits.clone());
                             if self.completed_generation == id {
-                                let selected = self.hits.get(self.selected).map(|h| h.path.clone());
-                                self.hits = good_search::semantic::merge(
+                                let hits = good_search::semantic::merge(
                                     &query,
                                     self.lexical_hits.clone(),
                                     hits,
                                     100,
                                 );
-                                self.selected = selected
-                                    .and_then(|p| self.hits.iter().position(|h| h.path == p))
-                                    .unwrap_or(0);
-                                self.trace_results = true;
+                                self.publish_hits(hits);
                             }
                         }
                         Err(e) => {
                             self.semantic_status = format!(
                             "Semantic search unavailable: {e}. Text results are still available."
-                        )
+                        );
+                            if self.background_refresh && self.completed_generation == id {
+                                self.publish_hits(self.lexical_hits.clone());
+                            }
                         }
                     }
                 }
