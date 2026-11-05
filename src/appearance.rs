@@ -68,7 +68,7 @@ impl App {
                     }
                     drag.on_hover_text("Drag to move Good Search");
                     ui.add_space(8.);
-                    if self.inspector.is_some() {
+                    if self.inspector.is_some() && !self.settings {
                         ui.label(RichText::new("Indexed data").size(21.).color(TEXT));
                         return;
                     }
@@ -105,10 +105,12 @@ impl App {
             )
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
-                    let label = if self.settings || self.inspector.is_some() {
+                    let label = if self.settings && self.inspector.is_some() {
+                        "Back to indexed data"
+                    } else if self.settings || self.inspector.is_some() {
                         "‹  Back to search"
                     } else {
-                        "Settings"
+                        "Settings (Ctrl+,)"
                     };
                     if ui
                         .add(
@@ -125,12 +127,17 @@ impl App {
                         self.focus = !self.settings;
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if self.inspector.is_some() {
+                        if self.inspector.is_some() && !self.settings {
                             key(ui, "Esc");
                             ui.label(RichText::new("Back to search").size(12.).color(MUTED));
                         } else if self.settings {
                             key(ui, "Esc");
-                            ui.label(RichText::new("Back to search").size(12.).color(MUTED));
+                            let back_label = if self.inspector.is_some() {
+                                "Back to indexed data"
+                            } else {
+                                "Back to search"
+                            };
+                            ui.label(RichText::new(back_label).size(12.).color(MUTED));
                             if ui
                                 .add(
                                     egui::Button::new(
@@ -168,7 +175,7 @@ impl App {
         egui::CentralPanel::no_frame()
             .frame(Frame::new().fill(BG).inner_margin(Margin::symmetric(8, 8)))
             .show(ui, |ui| {
-                if self.inspector.is_some() {
+                if self.inspector.is_some() && !self.settings {
                     self.draw_inspector(ui);
                     return;
                 }

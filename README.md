@@ -10,10 +10,11 @@ Launch `target\release\good-search.exe`. On first launch, enter the folders to i
 - Opening Good Search again reopens its existing window, including when hidden. Only one instance runs per data directory.
 - The borderless window keeps results full width, with Settings and key hints in the footer. Drag the search icon to move the window.
 - Search terms are combined with AND: `project budget` finds both, in either order. Quotes group phrases: `"project budget" approval` requires the phrase plus approval. An unfinished quote extends to the end of input. Content terms must occur in the same chunk; filename terms are literal substrings. A single one/two-character filename term still uses prefix matching. Matching is case insensitive; content phrases follow token boundaries rather than exact punctuation. Other operators and wildcard syntax are treated literally.
-- While the current query is pending, the window shows **Searchingâ€¦**. **No results** appears only after that query completes. Clearing the search clears results immediately.
+- While the current query is pending, the window shows **Searching...**. **No results** appears only after that query completes. Clearing the search clears results immediately.
 - Ctrl+C, Ctrl+X, and Ctrl+V use the Windows clipboard in Search, Selected folders, and Exclusions.
 - Up/down select a result; Enter or double-click opens it with its Windows default application.
-- Escape returns from Settings or Indexed data to the previous screen, clears a nonempty search, or hides an empty search window. Alt+F4 hides the window. **Settings â†’ Quit Good Search** exits the process.
+- Ctrl+, opens Settings from search or Indexed data. Back/Escape returns to the previous screen.
+- Escape returns from Settings or Indexed data to the previous screen, clears a nonempty search, or hides an empty search window. Alt+F4 hides the window. **Settings > Quit Good Search** exits the process.
 - If another program owns the hotkey, the app displays an error and keeps normal close behavior so it remains usable.
 - Escape on an empty search still hides the window when the hotkey is unavailable; launch Good Search again to recover the hidden window.
 

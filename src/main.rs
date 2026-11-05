@@ -244,10 +244,10 @@ fn run() -> Result<()> {
 }
 impl App {
     fn back(&mut self) {
-        if self.inspector.is_some() {
-            self.inspector = None;
-        } else {
+        if self.settings {
             self.settings = false;
+        } else {
+            self.inspector = None;
         }
         self.focus = !self.settings;
     }
@@ -367,6 +367,10 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             self.focus = true;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Comma)) {
+            self.settings = true;
+            self.focus = false;
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             if self.inspector.is_some() || self.settings {

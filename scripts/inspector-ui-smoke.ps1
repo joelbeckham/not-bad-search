@@ -75,6 +75,11 @@ try {
  [DesignProbe]::Click($script:h,90,158)
  Start-Sleep -Seconds 1
  Capture 'inspector'
+ [Windows.Forms.SendKeys]::SendWait('^,');Start-Sleep -Milliseconds 300
+ Capture 'settings-from-inspector'
+ [Windows.Forms.SendKeys]::SendWait('^,');Start-Sleep -Milliseconds 150
+ [Windows.Forms.SendKeys]::SendWait('{ESC}');Start-Sleep -Milliseconds 300
+ Capture 'returned-to-inspector'
  [DesignProbe]::Click($script:h,60,475)
  Start-Sleep -Milliseconds 300
  Capture 'back-to-search'
@@ -90,7 +95,7 @@ try {
  [Windows.Forms.SendKeys]::SendWait('{ESC}')
  Start-Sleep -Milliseconds 300
  if(-not [DesignProbe]::IsWindowVisible($script:h)){throw 'Escape hid the app instead of closing the inspector'}
- [DesignProbe]::Click($script:h,60,475);Start-Sleep -Milliseconds 300
+ [Windows.Forms.SendKeys]::SendWait('^,');Start-Sleep -Milliseconds 300
  $r=New-Object DesignProbe+Rect;[void][DesignProbe]::GetWindowRect($script:h,[ref]$r)
  $scale=[DesignProbe]::GetDpiForWindow($script:h)/96.0
  [void][DesignProbe]::SetCursorPos(($r.L+[int](500*$scale)),($r.T+[int](300*$scale)))
