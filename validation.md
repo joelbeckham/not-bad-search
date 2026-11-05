@@ -83,3 +83,7 @@ The user confirmed mouse activity during an interrupted content run; those incom
 ### Completed native content validation (2026-11-04)
 
 On the idle desktop, `scripts/search-repeat-smoke.ps1 -Rounds 20 -Content` passed all 20 search/clear/retype cycles against 2,279 text fixtures with no matching filenames. Maximum input-to-result latency: 138.15 ms; mean: 127.06 ms (includes SendKeys typing). Live text-edit notifications refreshed the result; Escape hid the window; launching a second instance reopened the existing one and exited. Working set: 98.93 MiB. Visible/hidden idle CPU: 0.312%/0.312% of one core over separate 10-second samples. Fixture: `test-data/repeat-1a3834ff9bf84ea1aabb75c7e8d54bce`. This completes the previously pending native checks; no application code changes were needed during this validation pass.
+
+## AND terms and quoted phrases
+
+Windows automated tests: 9 passed; strict Clippy passed. Integration coverage verifies unordered terms in both filenames and chunks, quoted phrases, mixed terms/phrases, multiple phrases, unfinished/empty quotes, literal OR and punctuation, and missing required terms. Existing filename, content lifecycle and migration tests remain green. No schema migration or reindex is required. Native input tests were not rerun for this query-only change.

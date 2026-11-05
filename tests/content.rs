@@ -121,3 +121,39 @@ fn migrate_legacy_and_read_during_write() -> Result<()> {
     assert!(open_db(&path).is_err());
     Ok(())
 }
+
+#[test]
+fn terms_phrases_and_literal_operators() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    for (name, body) in [
+        ("alpha.md", "budget annual project approval"),
+        ("beta.md", "project budget approval next year"),
+        ("gamma.md", "project-budget next year"),
+        ("project annual budget.txt", "nothing"),
+        ("project budget.txt", "nothing"),
+        ("literal.md", "project OR budget"),
+    ] {
+        std::fs::write(dir.path().join(name), body)?;
+    }
+    let mut db = open_db(std::path::Path::new(":memory:"))?;
+    let config = Config {
+        folders: vec![dir.path().into()],
+        content_folders: vec![dir.path().into()],
+        ..Default::default()
+    };
+    reconcile(&mut db, &config)?;
+    let names = |q| -> Result<Vec<String>> {
+        Ok(search(&db, q, 100)?.into_iter().map(|h| h.name).collect())
+    };
+    assert_eq!(names("project budget")?.len(), 6);
+    assert_eq!(names("budget project")?.len(), 6);
+    assert_eq!(names("\"project budget\"")?.len(), 3);
+    assert_eq!(names("\"project budget")?, names("\"project budget\"")?);
+    assert_eq!(names("\"project budget\" approval")?, vec!["beta.md"]);
+    assert_eq!(names("\"project budget\" \"next year\"")?.len(), 2);
+    assert_eq!(names("project OR budget")?, vec!["literal.md"]);
+    assert!(names("\"\"")?.is_empty());
+    assert!(names("budget absent")?.is_empty());
+    assert!(names("budget %")?.is_empty());
+    Ok(())
+}

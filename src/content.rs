@@ -156,15 +156,15 @@ pub(crate) fn index(db: &mut Connection, config: &Config) -> Result<Vec<String>>
 
 pub(crate) fn search_content(
     db: &Connection,
-    query: &str,
+    terms: &[String],
     limit: usize,
     hits: &mut Vec<Hit>,
 ) -> Result<()> {
-    if hits.len() >= limit || !query.chars().any(char::is_alphanumeric) {
+    if hits.len() >= limit || !terms.iter().any(|s| s.chars().any(char::is_alphanumeric)) {
         return Ok(());
     }
-    // Treat input as a literal phrase, never as user-supplied FTS syntax.
-    let pattern = format!("\"{}\"", query.replace('"', "\"\""));
+    // AND literal terms and quoted phrases; never expose raw FTS syntax.
+    let pattern = crate::query::fts(terms);
     let mut stmt = db.prepare("SELECT f.path,f.name,snippet(chunk_search,1,'[',']',' ... ',24),c.start_line FROM chunk_search JOIN chunks c ON c.id=chunk_search.rowid JOIN documents d ON d.id=c.document_id JOIN files f ON f.id=d.file_id WHERE chunk_search MATCH ?1 ORDER BY rank LIMIT 1000")?;
     let mut rows = stmt.query([pattern])?;
     let mut seen: HashSet<String> = hits.iter().map(|h| h.path.clone()).collect();

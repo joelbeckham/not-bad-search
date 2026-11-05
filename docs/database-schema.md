@@ -33,7 +33,7 @@ IDs are internal, not durable filesystem identities. Rename currently means dele
 - `files_ai/ad/au` and `chunks_ai/ad/au` synchronize inserts/deletes/updates. Delete triggers use the external-content FTS delete command with old values.
 - SQLite creates internal `names_*` and `chunk_search_*` shadow tables; do not edit them directly.
 
-Filename matches come first. One/two-character queries use escaped prefix LIKE; longer queries use literal trigram phrases with substring verification. At most 1,000 filename candidates are ranked. Content queries are literal token phrases, ranked by FTS rank; at most 1,000 chunks are considered and deduplicated by file. Input is never interpreted as FTS operators. Core results cap at 200; UI requests 100. Excerpts use FTS snippet with bracketed matching tokens.
+Filename matches come first. One/two-character queries use escaped prefix LIKE; longer queries use literal trigram phrases with substring verification. At most 1,000 filename candidates are ranked. Unquoted terms are ANDed; double quotes group phrases (an unfinished quote extends through end of input). Filename terms are substrings, using available trigram terms to narrow candidates and verifying every term before the candidate cap; a single short term retains prefix matching. Multiple short-only filename terms require a scan. Content terms/phrases must match the same chunk and are ranked by FTS rank; at most 1,000 chunks are considered and deduplicated by file. Input is never interpreted as FTS operators. Core results cap at 200; UI requests 100. Excerpts use FTS snippet with bracketed matching tokens.
 
 ## Indexing and transactions
 

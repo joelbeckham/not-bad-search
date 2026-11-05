@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 mod content;
+mod query;
 mod storage;
 pub use storage::{open_db, open_reader, open_writer};
 
@@ -79,18 +80,54 @@ pub struct Hit {
 }
 
 pub fn search(db: &Connection, query: &str, limit: usize) -> Result<Vec<Hit>> {
-    let q = query.trim().to_lowercase();
-    if q.is_empty() {
+    let terms = query::terms(query);
+    if terms.is_empty() || limit == 0 {
         return Ok(vec![]);
     }
-    let (sql, pattern) = if q.chars().count() >= 3 {
-        ("WITH candidates AS MATERIALIZED (SELECT f.path,f.name,f.folded FROM names JOIN files f ON f.id=names.rowid WHERE names MATCH ?1 AND instr(f.folded,?2)>0 LIMIT 1000) SELECT path,name FROM candidates ORDER BY (folded=?2) DESC,length(name),path LIMIT ?3", format!("\"{}\"",q.replace('"', "\"\"")))
+    let q = terms.join(" ");
+    let long: Vec<String> = terms
+        .iter()
+        .filter(|s| s.chars().count() >= 3)
+        .cloned()
+        .collect();
+    let mut values: Vec<rusqlite::types::Value> = vec![];
+    let mut filters = vec![];
+    let from = if long.is_empty() {
+        "files f"
     } else {
-        ("SELECT path,name FROM files WHERE folded LIKE ?1 ESCAPE '\\' ORDER BY folded COLLATE NOCASE LIMIT ?3", format!("{}%",q.replace('\\',"\\\\").replace('%',"\\%").replace('_',"\\_")))
+        values.push(query::fts(&long).into());
+        filters.push("names MATCH ?1".to_owned());
+        "names JOIN files f ON f.id=names.rowid"
     };
-    let mut stmt = db.prepare(sql)?;
-    // Numbered parameters allow the short-query branch to share this binding.
-    let rows = stmt.query_map(params![pattern, q, limit.min(200) as i64], |r| {
+    if terms.len() == 1 && long.is_empty() {
+        let escaped = terms[0]
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        values.push(format!("{escaped}%").into());
+        filters.push(format!("f.folded LIKE ?{} ESCAPE '\\'", values.len()));
+    } else {
+        for term in &terms {
+            values.push(term.clone().into());
+            filters.push(format!("instr(f.folded,?{})>0", values.len()));
+        }
+    }
+    values.push(q.into());
+    let exact = values.len();
+    values.push((limit.min(200) as i64).into());
+    let order = if terms.len() == 1 && long.is_empty() {
+        "folded COLLATE NOCASE".to_owned()
+    } else {
+        format!("(folded=?{exact}) DESC,length(name),path")
+    };
+    let candidate_order = if terms.len() == 1 && long.is_empty() {
+        " ORDER BY f.folded COLLATE NOCASE"
+    } else {
+        ""
+    };
+    let sql = format!("WITH candidates AS MATERIALIZED (SELECT f.path,f.name,f.folded FROM {from} WHERE {}{candidate_order} LIMIT 1000) SELECT path,name FROM candidates ORDER BY {order} LIMIT ?{}",filters.join(" AND "),values.len());
+    let mut stmt = db.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(values), |r| {
         Ok(Hit {
             path: r.get(0)?,
             name: r.get(1)?,
@@ -98,7 +135,7 @@ pub fn search(db: &Connection, query: &str, limit: usize) -> Result<Vec<Hit>> {
         })
     })?;
     let mut hits: Vec<Hit> = rows.collect::<rusqlite::Result<_>>()?;
-    content::search_content(db, &q, limit.min(200), &mut hits)?;
+    content::search_content(db, &terms, limit.min(200), &mut hits)?;
     Ok(hits)
 }
 
