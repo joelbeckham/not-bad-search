@@ -68,6 +68,10 @@ impl App {
                     }
                     drag.on_hover_text("Drag to move Good Search");
                     ui.add_space(8.);
+                    if self.inspector.is_some() {
+                        ui.label(RichText::new("Indexed data").size(21.).color(TEXT));
+                        return;
+                    }
                     let input = ui.add(
                         egui::TextEdit::singleline(&mut self.query)
                             .id_salt("search_input")
@@ -101,7 +105,7 @@ impl App {
             )
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
-                    let label = if self.settings {
+                    let label = if self.settings || self.inspector.is_some() {
                         "‹  Back to search"
                     } else {
                         "Settings"
@@ -113,11 +117,20 @@ impl App {
                         )
                         .clicked()
                     {
-                        self.settings = !self.settings;
+                        if self.inspector.is_some() || self.settings {
+                            self.back();
+                        } else {
+                            self.settings = true;
+                        }
                         self.focus = !self.settings;
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if self.settings {
+                        if self.inspector.is_some() {
+                            key(ui, "Esc");
+                            ui.label(RichText::new("Back to search").size(12.).color(MUTED));
+                        } else if self.settings {
+                            key(ui, "Esc");
+                            ui.label(RichText::new("Back to search").size(12.).color(MUTED));
                             if ui
                                 .add(
                                     egui::Button::new(
@@ -142,7 +155,12 @@ impl App {
                             ui.label(RichText::new("Navigate").size(12.).color(MUTED));
                             ui.add_space(12.);
                             key(ui, "Esc");
-                            ui.label(RichText::new("Hide").size(12.).color(MUTED));
+                            let action = if self.query.is_empty() {
+                                "Hide"
+                            } else {
+                                "Clear search"
+                            };
+                            ui.label(RichText::new(action).size(12.).color(MUTED));
                         }
                     });
                 });
@@ -150,6 +168,10 @@ impl App {
         egui::CentralPanel::no_frame()
             .frame(Frame::new().fill(BG).inner_margin(Margin::symmetric(8, 8)))
             .show(ui, |ui| {
+                if self.inspector.is_some() {
+                    self.draw_inspector(ui);
+                    return;
+                }
                 if self.settings {
                     self.draw_settings(ui);
                     return;
@@ -197,13 +219,14 @@ impl App {
                 let moved = ctx.input(|i| {
                     i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::ArrowUp)
                 });
-                if ctx.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                if self.inspector.is_none() && ctx.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
                     self.selected = (self.selected + 1).min(self.hits.len().saturating_sub(1));
                 }
-                if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                if self.inspector.is_none() && ctx.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
                     self.selected = self.selected.saturating_sub(1);
                 }
                 let mut open = None;
+                let mut inspect = None;
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -278,6 +301,12 @@ impl App {
                                 FontId::proportional(10.),
                                 MUTED,
                             );
+                            if response.secondary_clicked() { self.selected=index; }
+                            response.context_menu(|ui| {
+                                if ui.button("Inspect indexed data").clicked() {inspect=Some(hit.path.clone());ui.close();}
+                                if ui.button("Copy path").clicked() {ctx.copy_text(hit.path.clone());ui.close();}
+                                if ui.button("Open file").clicked() {open=Some(hit.path.clone());ui.close();}
+                            });
                             if response.clicked() {
                                 self.selected = index;
                             }
@@ -316,9 +345,10 @@ impl App {
                             });
                         }
                     });
-                if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if self.inspector.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
                     open = self.hits.get(self.selected).map(|h| h.path.clone());
                 }
+                if let Some(path) = inspect { self.inspect_file(path); }
                 if let Some(path) = open {
                     if let Err(e) = crate::platform::open_file(&path) {
                         self.error = e.to_string();
@@ -387,12 +417,12 @@ impl App {
                             .map(Into::into)
                             .collect();
                         self.content_folders.retain(|p| roots.contains(p));
-                        for root in roots {
-                            let mut enabled = self.content_folders.contains(&root);
+                        for root in &roots {
+                            let mut enabled = self.content_folders.contains(root);
                             if ui.checkbox(&mut enabled, root.to_string_lossy()).changed() {
-                                self.content_folders.retain(|p| p != &root);
+                                self.content_folders.retain(|p| p != root);
                                 if enabled {
-                                    self.content_folders.push(root);
+                                    self.content_folders.push(root.clone());
                                 }
                             }
                         }
@@ -404,6 +434,59 @@ impl App {
                                     .suffix(" MiB"),
                             );
                         });
+                        ui.add_space(12.);
+                        ui.label(RichText::new("Search inside images with OpenAI").size(13.));
+                        ui.label("Selected image folders send PNG, JPEG and WebP images to OpenAI during indexing. API charges apply. Searches stay local.");
+                        self.config.image_folders.retain(|p|roots.contains(p));
+                        for root in &roots {
+                            let mut enabled=self.config.image_folders.contains(root);
+                            if ui.checkbox(&mut enabled,root.to_string_lossy()).changed() {
+                                self.config.image_folders.retain(|p|p!=root);
+                                if enabled { self.config.image_folders.push(root.clone()); }
+                            }
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label("Image analysis model");
+                            egui::ComboBox::from_id_salt("image_analysis_model")
+                                .selected_text(match self.config.image_model.as_str() {
+                                    good_search::DEFAULT_IMAGE_MODEL => "GPT-6.1 Terra (default)",
+                                    "gpt-5.6-terra" => "GPT-5.6 Terra",
+                                    _ => "Custom model",
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut self.config.image_model, good_search::DEFAULT_IMAGE_MODEL.into(), "GPT-6.1 Terra (default)");
+                                    ui.selectable_value(&mut self.config.image_model, "gpt-5.6-terra".into(), "GPT-5.6 Terra");
+                                    if ui.selectable_label(!matches!(self.config.image_model.as_str(), good_search::DEFAULT_IMAGE_MODEL | "gpt-5.6-terra"), "Custom model").clicked() {
+                                        self.config.image_model.clear();
+                                    }
+                                });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("API model ID");
+                            ui.add(egui::TextEdit::singleline(&mut self.config.image_model).hint_text(good_search::DEFAULT_IMAGE_MODEL));
+                        });
+                        ui.label("Apply with Save changes. Changing models reanalyzes selected images and uses your daily request cap.");
+                        ui.horizontal(|ui| {
+                            ui.label("Daily request cap (UTC)");
+                            ui.add(egui::DragValue::new(&mut self.config.image_daily_requests).range(0..=10000));
+                        });
+                        ui.label("Requests include retries. This is a request cap, not a dollar budget.");
+                        ui.checkbox(&mut self.config.images_paused,"Pause image processing (apply with Save changes)");
+                        ui.label(if self.key_saved { "API key saved in Windows Credential Manager" } else { "No API key saved" });
+                        ui.add(egui::TextEdit::singleline(&mut self.api_key_input).password(true).hint_text("OpenAI API key"));
+                        ui.horizontal(|ui| {
+                            if ui.button("Store key").clicked() {
+                                match good_search::credentials::save(&self.api_key_input) {
+                                    Ok(())=>{self.api_key_input.clear();self.key_saved=true;let _=self.image_wake.try_send(false);},
+                                    Err(e)=>self.error=e.to_string(),
+                                }
+                            }
+                            if ui.button("Remove key").clicked() {
+                                match good_search::credentials::remove() {Ok(())=>self.key_saved=false,Err(e)=>self.error=e.to_string()}
+                            }
+                            if ui.button("Retry failed images").clicked() {let _=self.image_wake.try_send(true);}
+                        });
+                        ui.label(&self.image_status);
                         if ui
                             .add(
                                 egui::Button::new(RichText::new("Save changes").color(TEXT))

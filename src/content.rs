@@ -6,15 +6,15 @@ use std::{collections::HashSet, fs::File, io::Read, path::Path};
 const EXTRACTOR_VERSION: i64 = 1;
 const CHUNKER_VERSION: i64 = 1;
 
-struct Chunk {
-    heading: String,
-    line: usize,
-    body: String,
+pub(crate) struct Chunk {
+    pub(crate) heading: String,
+    pub(crate) line: usize,
+    pub(crate) body: String,
 }
 
 // Keep raw Markdown (including code) searchable. Bounded chunks respect lines
 // where possible; even a single very long line is bounded on Unicode boundaries.
-fn chunks(text: &str) -> Vec<Chunk> {
+pub(crate) fn chunks(text: &str) -> Vec<Chunk> {
     let mut result = Vec::new();
     let mut heading = String::new();
     let mut body = String::new();
@@ -100,7 +100,10 @@ pub(crate) fn index(db: &mut Connection, config: &Config) -> Result<Vec<String>>
                 matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown" | "txt")
             });
         if !supported || !config.content_folders.iter().any(|p| p == Path::new(&root)) {
-            db.execute("DELETE FROM documents WHERE file_id=?1", [file_id])?;
+            db.execute(
+                "DELETE FROM documents WHERE file_id=?1 AND kind='text'",
+                [file_id],
+            )?;
             continue;
         }
         // Preserve the last searchable snapshot for disconnected roots.
@@ -119,7 +122,7 @@ pub(crate) fn index(db: &mut Connection, config: &Config) -> Result<Vec<String>>
             }
         };
         let previous: Option<(i64,String,i64,i64,String,String)> = db.query_row(
-            "SELECT id,source_hash,extractor_version,chunker_version,status,detail FROM documents WHERE file_id=?1",
+            "SELECT id,source_hash,extractor_version,chunker_version,status,detail FROM documents WHERE file_id=?1 AND kind='text'",
             [file_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).optional()?;
         if previous.as_ref().is_some_and(|p| {
             p.1 == hash
@@ -133,10 +136,10 @@ pub(crate) fn index(db: &mut Connection, config: &Config) -> Result<Vec<String>>
         let chunks = chunks(&text);
         // No filesystem I/O or extraction while holding the writer transaction.
         let tx = db.transaction()?;
-        tx.execute("INSERT INTO documents(file_id,source_hash,extractor_version,chunker_version,status,detail) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(file_id) DO UPDATE SET source_hash=excluded.source_hash,extractor_version=excluded.extractor_version,chunker_version=excluded.chunker_version,status=excluded.status,detail=excluded.detail",
+        tx.execute("INSERT INTO documents(file_id,kind,source_hash,extractor_version,chunker_version,status,detail) VALUES(?1,'text',?2,?3,?4,?5,?6) ON CONFLICT(file_id,kind) DO UPDATE SET source_hash=excluded.source_hash,extractor_version=excluded.extractor_version,chunker_version=excluded.chunker_version,status=excluded.status,detail=excluded.detail",
             params![file_id,hash,EXTRACTOR_VERSION,CHUNKER_VERSION,status,detail])?;
         let id: i64 = tx.query_row(
-            "SELECT id FROM documents WHERE file_id=?1",
+            "SELECT id FROM documents WHERE file_id=?1 AND kind='text'",
             [file_id],
             |r| r.get(0),
         )?;
@@ -165,7 +168,7 @@ pub(crate) fn search_content(
     }
     // AND literal terms and quoted phrases; never expose raw FTS syntax.
     let pattern = crate::query::fts(terms);
-    let mut stmt = db.prepare("SELECT f.path,f.name,snippet(chunk_search,1,'[',']',' ... ',24),c.start_line FROM chunk_search JOIN chunks c ON c.id=chunk_search.rowid JOIN documents d ON d.id=c.document_id JOIN files f ON f.id=d.file_id WHERE chunk_search MATCH ?1 ORDER BY rank LIMIT 1000")?;
+    let mut stmt = db.prepare("SELECT f.path,f.name,snippet(chunk_search,1,'[',']',' ... ',24),c.start_line,d.kind FROM chunk_search JOIN chunks c ON c.id=chunk_search.rowid JOIN documents d ON d.id=c.document_id JOIN files f ON f.id=d.file_id WHERE chunk_search MATCH ?1 ORDER BY rank LIMIT 1000")?;
     let mut rows = stmt.query([pattern])?;
     let mut seen: HashSet<String> = hits.iter().map(|h| h.path.clone()).collect();
     while let Some(row) = rows.next()? {
@@ -173,11 +176,17 @@ pub(crate) fn search_content(
         if seen.insert(path.clone()) {
             let excerpt: String = row.get(2)?;
             let line: i64 = row.get(3)?;
+            let kind: String = row.get(4)?;
+            let label = match kind.as_str() {
+                "image_text" => "Image text".to_owned(),
+                "image_description" => "Image description".to_owned(),
+                _ => format!("Text · line {line}"),
+            };
             hits.push(Hit {
                 path,
                 name: row.get(1)?,
                 snippet: Some(format!(
-                    "Text · line {line}: {}",
+                    "{label}: {}",
                     excerpt.split_whitespace().collect::<Vec<_>>().join(" ")
                 )),
             });

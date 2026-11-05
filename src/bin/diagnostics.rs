@@ -10,6 +10,55 @@ use std::{
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        Some("image-status") => {
+            let db = good_search::open_reader(Path::new(
+                args.get(2).context("Database path required")?,
+            ))?;
+            println!("{}", good_search::images::summary(&db)?);
+            let count: i64 = db.query_row(
+                "SELECT count(*) FROM documents WHERE kind IN ('image_text','image_description')",
+                [],
+                |r| r.get(0),
+            )?;
+            println!("image_documents={count}");
+        }
+        Some("store-key-file") => {
+            let key = std::fs::read_to_string(args.get(2).context("Private key file required")?)?;
+            good_search::credentials::save(&key)?;
+            println!("API key stored in Windows Credential Manager");
+        }
+        Some("image-test") => {
+            let path = Path::new(args.get(2).context("New database path required")?);
+            if path.exists() {
+                anyhow::bail!("Use a new test database");
+            }
+            let root =
+                std::path::PathBuf::from(args.get(3).context("Synthetic fixture folder required")?);
+            let config = Config {
+                folders: vec![root.clone()],
+                image_folders: vec![root],
+                image_daily_requests: 1,
+                ..Default::default()
+            };
+            let mut db = open_db(path)?;
+            reconcile(&mut db, &config)?;
+            let client = good_search::images::OpenAi::new()?;
+            good_search::images::process_one(&mut db, &client, || config.clone())?;
+            println!("{}", good_search::images::summary(&db)?);
+            let count: i64 = db.query_row(
+                "SELECT count(*) FROM documents WHERE kind IN ('image_text','image_description')",
+                [],
+                |r| r.get(0),
+            )?;
+            if count != 2 {
+                anyhow::bail!("Expected two extracted documents");
+            }
+            let hits = search(&db, "marmalade", 10)?;
+            if hits.is_empty() {
+                anyhow::bail!("Synthetic image text was not searchable");
+            }
+            println!("Image text and description indexed; synthetic text search passed");
+        }
         Some("bench") => {
             let path = Path::new(args.get(2).context("bench requires a new database path")?);
             if path.exists() {

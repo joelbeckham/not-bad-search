@@ -20,7 +20,7 @@ pub fn open_reader(path: &Path) -> Result<Connection> {
 pub fn open_db(path: &Path) -> Result<Connection> {
     let mut db = open_writer(path)?;
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version > 1 {
+    if version > 2 {
         bail!("Index schema {version} is newer than this application supports");
     }
     db.execute_batch("PRAGMA journal_mode=WAL;")?;
@@ -29,6 +29,26 @@ pub fn open_db(path: &Path) -> Result<Connection> {
         tx.execute_batch(include_str!("schema.sql"))?;
         tx.pragma_update(None, "user_version", 1)?;
         tx.commit()?;
+    }
+    if version < 2 {
+        // Disable outside the transaction so rebuilding the parent preserves chunks.
+        db.pragma_update(None, "foreign_keys", false)?;
+        let result = (|| -> Result<()> {
+            let tx = db.transaction()?;
+            tx.execute_batch(include_str!("schema-v2.sql"))?;
+            let violations: i64 =
+                tx.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
+                    r.get(0)
+                })?;
+            if violations != 0 {
+                bail!("Foreign key validation failed during migration");
+            }
+            tx.pragma_update(None, "user_version", 2)?;
+            tx.commit()?;
+            Ok(())
+        })();
+        db.pragma_update(None, "foreign_keys", true)?;
+        result?;
     }
     Ok(db)
 }

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod appearance;
+mod inspector_ui;
 mod platform;
 use anyhow::{Context, Result};
 use eframe::egui;
@@ -17,6 +18,7 @@ enum Event {
     SearchFailed(u64, String),
     Status(String),
     Error(String),
+    ImageStatus(String, bool),
 }
 fn trace(path: &std::path::Path, message: &str) {
     if std::env::var_os("GOOD_SEARCH_WORKER_TRACE").is_some() {
@@ -31,6 +33,7 @@ fn trace(path: &std::path::Path, message: &str) {
     }
 }
 struct App {
+    inspector: Option<inspector_ui::Inspector>,
     _instance: platform::Instance,
     submitted_query: String,
     searching: bool,
@@ -51,6 +54,10 @@ struct App {
     exclusions: String,
     content_folders: Vec<PathBuf>,
     content_limit_mib: u64,
+    image_status: String,
+    image_wake: mpsc::SyncSender<bool>,
+    api_key_input: String,
+    key_saved: bool,
     settings: bool,
     status: String,
     error: String,
@@ -58,6 +65,65 @@ struct App {
     shared_config: Arc<Mutex<Config>>,
     _hotkey: Option<platform::Hotkey>,
     focus: bool,
+}
+
+fn start_image_worker(
+    path: PathBuf,
+    config: Arc<Mutex<Config>>,
+    events: mpsc::Sender<Event>,
+    ctx: egui::Context,
+) -> mpsc::SyncSender<bool> {
+    let (wake, rx) = mpsc::sync_channel(8);
+    std::thread::spawn(move || {
+        let run = || -> Result<()> {
+            platform::background_priority()?;
+            let mut db = open_writer(&path)?;
+            good_search::images::recover(&db)?;
+            let client = good_search::images::OpenAi::new()?;
+            let mut previous = String::new();
+            loop {
+                let current = config.lock().unwrap().clone();
+                let key = good_search::credentials::load()?.is_some();
+                let changed = if key {
+                    good_search::images::process_one(&mut db, &client, || {
+                        config.lock().unwrap().clone()
+                    })?
+                } else {
+                    false
+                };
+                let prefix = if current.images_paused {
+                    "Paused. "
+                } else if !key {
+                    "Add an API key to process images. "
+                } else {
+                    ""
+                };
+                let status = format!("{prefix}{}", good_search::images::summary(&db)?);
+                if changed || status != previous {
+                    previous = status.clone();
+                    let _ = events.send(Event::ImageStatus(status, changed));
+                    ctx.request_repaint();
+                }
+                if changed {
+                    continue;
+                }
+                match rx.recv_timeout(Duration::from_secs(5)) {
+                    Ok(true) => good_search::images::retry_failed(&db)?,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    _ => {}
+                }
+            }
+            Ok(())
+        };
+        if let Err(e) = run() {
+            let _ = events.send(Event::ImageStatus(
+                format!("Image worker stopped: {e}"),
+                false,
+            ));
+            ctx.request_repaint();
+        }
+    });
+    wake
 }
 
 fn main() {
@@ -126,6 +192,8 @@ fn run() -> Result<()> {
             }
         });
         let shared_config=Arc::new(Mutex::new(config.clone()));
+        let image_wake=start_image_worker(db_path.clone(),shared_config.clone(),tx.clone(),cc.egui_ctx.clone());
+        let image_notify=image_wake.clone();
         let (index_wake,index_rx)=mpsc::sync_channel(1);
         let cfg=shared_config.clone(); let context=cc.egui_ctx.clone(); let notify_tx=index_wake.clone();
         std::thread::spawn(move || {
@@ -160,6 +228,7 @@ fn run() -> Result<()> {
                     Err(e)=>{let _=tx.send(Event::Error(e.to_string()));}
                 }
                 context.request_repaint();
+                let _=image_notify.try_send(false);
                 match index_rx.recv_timeout(Duration::from_secs(config.reconcile_seconds)) {
                     Err(mpsc::RecvTimeoutError::Disconnected)=>break,
                     _=>{std::thread::sleep(Duration::from_millis(250)); while index_rx.try_recv().is_ok() {}}
@@ -169,11 +238,20 @@ fn run() -> Result<()> {
         let window=match cc.window_handle()?.as_raw() {RawWindowHandle::Win32(h)=>h.hwnd.get(),_=>return Err("Windows window handle unavailable".into())};
         instance.attach(window)?;
         let (hotkey,error)=match platform::Hotkey::register(cc.egui_ctx.clone(),window) {Ok(h)=>(Some(h),String::new()),Err(e)=>(None,e.to_string())};
-        Ok(Box::new(App {_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,folders:config.folders.iter().map(|p|p.to_string_lossy()).collect::<Vec<_>>().join("\n"), exclusions:config.exclusions.join("\n"), settings:config.folders.is_empty(), content_folders:config.content_folders.clone(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
+        Ok(Box::new(App {inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,folders:config.folders.iter().map(|p|p.to_string_lossy()).collect::<Vec<_>>().join("\n"), exclusions:config.exclusions.join("\n"), image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.folders.is_empty(), content_folders:config.content_folders.clone(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
     })).map_err(|e|anyhow::anyhow!(e.to_string()))?;
     Ok(())
 }
 impl App {
+    fn back(&mut self) {
+        if self.inspector.is_some() {
+            self.inspector = None;
+        } else {
+            self.settings = false;
+        }
+        self.focus = !self.settings;
+    }
+
     fn submit(&mut self) {
         self.generation += 1;
         self.submitted_query.clone_from(&self.query);
@@ -234,6 +312,7 @@ impl App {
         self.searching = !self.query.trim().is_empty();
         self.error.clear();
         let _ = self.index_wake.try_send(());
+        let _ = self.image_wake.try_send(false);
         Ok(())
     }
 }
@@ -266,6 +345,12 @@ impl eframe::App for App {
                     }
                 }
                 Event::Error(e) => self.error = e,
+                Event::ImageStatus(status, changed) => {
+                    self.image_status = status;
+                    if changed {
+                        self.submit();
+                    }
+                }
                 Event::SearchFailed(id, error) if id == self.generation => {
                     self.completed_generation = id;
                     self.searching = false;
@@ -284,10 +369,19 @@ impl eframe::App for App {
             self.focus = true;
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-            self.focus = true;
+            if self.inspector.is_some() || self.settings {
+                self.back();
+            } else if !self.query.is_empty() {
+                self.query.clear();
+                self.submit();
+                self.focus = true;
+            } else {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                self.focus = true;
+            }
         }
         self.draw_window(ui);
+
         self.searching =
             !self.query.trim().is_empty() && self.completed_generation != self.generation;
         // A fast worker can finish after logic() drains the channel but during the

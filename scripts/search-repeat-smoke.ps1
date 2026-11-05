@@ -112,6 +112,9 @@ try {
  # sample, then assert the hidden idle budget to detect a persistent polling loop.
  if([SearchProbe]::GetForegroundWindow() -ne $hwnd){throw 'Test window lost focus before Escape'}
  Send-TestKeys('{ESC}');Start-Sleep -Milliseconds 300
+ if(-not [SearchProbe]::IsWindowVisible($hwnd)){throw 'Escape hid a nonempty search'}
+ $generation=Wait-Result '' 0 $generation
+ Send-TestKeys('{ESC}');Start-Sleep -Milliseconds 300
  if([SearchProbe]::IsWindowVisible($hwnd)){throw 'Escape did not hide the search window'}
  $proc.Refresh();$cpu=$proc.TotalProcessorTime.TotalSeconds;$idle.Restart()
  Start-Sleep -Seconds 10;$proc.Refresh()

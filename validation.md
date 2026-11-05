@@ -87,3 +87,22 @@ On the idle desktop, `scripts/search-repeat-smoke.ps1 -Rounds 20 -Content` passe
 ## AND terms and quoted phrases
 
 Windows automated tests: 9 passed; strict Clippy passed. Integration coverage verifies unordered terms in both filenames and chunks, quoted phrases, mixed terms/phrases, multiple phrases, unfinished/empty quotes, literal OR and punctuation, and missing required terms. Existing filename, content lifecycle and migration tests remain green. No schema migration or reindex is required. Native input tests were not rerun for this query-only change.
+
+## OpenAI image extraction and schema v2 (2026-11-04)
+
+- 14 Windows automated tests passed; strict Clippy over all targets passed; Windows GNU release built.
+- Migration test starts from a populated v1 database, preserves document/chunk identities and searchable FTS content, allows multiple source documents, and verifies cascading deletion plus FTS integrity.
+- Fake-provider tests verify duplicate-image cache reuse, unchanged scan behavior, changed-byte invalidation, opt-out cleanup, pause/resume caching, persistent request caps, retry backoff, interrupted-request handling, stale-result rejection, and refusal/incomplete/malformed response rejection.
+- Live API test: exactly one request using gpt-5.6-terra on a generated synthetic invoice image. Both extracted_text and description were published; searching marmalade returned the image. No user images were uploaded by this test. Credential was imported through a private file into Windows Credential Manager without exposing it in logs or arguments.
+- Native image UI test used the already-indexed fixture with daily request cap=0: labeled image-text result, settings layout and Escape passed. Hidden CPU over 10 seconds: 0.156% of one core; working set: 100.51 MiB. App-only search/settings screenshots inspected. Fixture: test-data/image-api-0316de855c524943a523663549eadde2.
+- These checks do not establish OCR accuracy across real-world images or WSL image throughput. Existing WSL notification limitations still apply. No local OCR or embeddings were added.
+
+## Indexed-data inspector
+
+15 automated Windows tests and strict Clippy passed. The inspector test verifies complete metadata, both image extraction kinds, multiline chunk bodies, hashes, job attempts, cached descriptions, read-only access and removed-file handling. Native synthetic-image test verified the context menu, inspector rendering, Escape closing the inspector without hiding the app, then normal Escape hiding. Screenshots inspected. Hidden idle CPU: 0.156% of one core over 10 seconds; working set: 93.63 MiB. Initial synthetic clicks were too short for reliable menu activation; the test now uses a normal-duration press/release. No extraction/API requests occur when inspecting or refreshing.
+
+Full-page inspector update: Windows release build and strict Clippy passed. Native check verified full-window rendering, footer Back to search, reopening the inspector, and Escape returning to search without hiding the app. Hidden idle CPU: 0.156% of one core; working set: 99.80 MiB. Screenshot inspected.
+
+Escape navigation update: strict Clippy and Windows release build passed. Native inspector smoke check passed: footer Back, inspector Escape, Settings Escape preserving the query, Escape clearing query/results while remaining visible, and a final Escape hiding the empty search. Screenshot verified. Hidden CPU 0.469% of one core, working set 100.02 MiB. Updated existing image/search smoke scripts for the new behavior.
+
+Image model settings update: default gpt-6.1-terra, preset selector plus editable custom API ID. Explicit saved choices remain intact. All 15 automated Windows tests, strict Clippy and release build passed. Live synthetic invoice test with Terra 6.1 made one request and produced both documents plus a searchable transcription. Native Settings layout and Escape smoke passed using a pinned cached GPT-5.6 fixture with request cap zero; screenshot inspected. Hidden CPU 0.624% of one core; working set 94.98 MiB.

@@ -6,7 +6,7 @@ Executable definitions: [schema.sql](../src/schema.sql). Migrations and connecti
 
 The Windows-local database is `%LOCALAPPDATA%\GoodSearch\index.sqlite`. `GOOD_SEARCH_DATA` overrides the directory. WSL UNC paths are sources only. Configuration lives in `config.toml` beside the index.
 
-`PRAGMA user_version = 1` identifies this schema. Startup adopts the original unversioned filename index (version 0) and creates content tables in one transaction, preserving filename rows. Workers start after migration. Newer versions are rejected. Future changes require numbered migrations.
+`PRAGMA user_version = 2` identifies this schema. Startup adopts the original unversioned filename index (version 0) and creates content tables in one transaction, preserving filename rows. Workers start after migration. Newer versions are rejected. Future changes require numbered migrations.
 
 ## Tables and columns
 
@@ -15,12 +15,12 @@ All columns are NOT NULL, except primary keys which carry identity constraints.
 | Table | Columns |
 | --- | --- |
 | `files` | `id INTEGER PRIMARY KEY`; `root TEXT`; `path TEXT UNIQUE`; `name TEXT`; `folded TEXT` |
-| `documents` | `id INTEGER PRIMARY KEY AUTOINCREMENT`; `file_id INTEGER UNIQUE REFERENCES files(id) ON DELETE CASCADE`; `source_hash TEXT`; `extractor_version INTEGER`; `chunker_version INTEGER`; `status TEXT`; `detail TEXT` |
+| `documents` | `id INTEGER PRIMARY KEY AUTOINCREMENT`; `file_id INTEGER REFERENCES files(id) ON DELETE CASCADE`; `kind TEXT`; `source_hash TEXT`; `extractor_version INTEGER`; `chunker_version INTEGER`; `status TEXT`; `detail TEXT` |
 | `chunks` | `id INTEGER PRIMARY KEY AUTOINCREMENT`; `document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE`; `ordinal INTEGER`; `heading TEXT`; `start_line INTEGER`; `body TEXT`; `content_hash TEXT` |
 
 `files.root` is the selected root, `path` the full Unicode path, `name` the basename, and `folded` its Rust lowercase form (not full Unicode case folding). `files_prefix` indexes `folded COLLATE NOCASE`. Path uniqueness uses default SQLite collation: Windows aliases/case variants are not canonicalized. Overlapping roots share one file record; the later scan assigns the root, which determines text opt-in.
 
-`documents.source_hash` is the BLAKE3 hex digest of original bytes, or empty on failure. Algorithm versions are currently 1. Status is constrained to ready/skipped/error; this extractor uses ready/error. Detail is empty on success, otherwise a failure reason. Empty valid files have zero chunks. Read/size/encoding errors remove stale chunks and retry on subsequent scans. Disconnected roots retain their prior snapshot.
+`UNIQUE(file_id,kind)` allows independently searchable text, image_text and image_description documents per file. `documents.source_hash` is the BLAKE3 hex digest of original bytes, or empty on failure. Algorithm versions are currently 1. Status is constrained to ready/skipped/error; this extractor uses ready/error. Detail is empty on success, otherwise a failure reason. Empty valid files have zero chunks. Read/size/encoding errors remove stale chunks and retry on subsequent scans. Disconnected roots retain their prior snapshot.
 
 Chunks have zero-based ordinal, latest heuristic Markdown heading, one-based source start line, stored UTF-8 body and BLAKE3 body hash. `UNIQUE(document_id,ordinal)` indexes document membership.
 
@@ -61,7 +61,7 @@ The index.sqlite-wal and index.sqlite-shm files belong with the database. For an
 
 ## Future embeddings
 
-No vector tables, vector extension or embedding/API calls exist. Future vectors should reference chunk identity and content revision, with model/version/dimensions/metric metadata. Do not mix incompatible embedding spaces. Replacing chunks must invalidate vectors transactionally, or via durable synchronization for an external index. Local semantic queries also require local query embeddings.
+No vector tables, vector extension or embedding calls exist. Image extraction uses OpenAI during indexing only. Future vectors should reference chunk identity and content revision, with model/version/dimensions/metric metadata. Do not mix incompatible embedding spaces. Replacing chunks must invalidate vectors transactionally, or via durable synchronization for an external index. Local semantic queries also require local query embeddings.
 
 ## Read-only inspection
 
@@ -77,3 +77,16 @@ SELECT f.path,d.detail FROM documents d JOIN files f ON f.id=d.file_id WHERE d.s
 ```
 
 Connection-specific pragmas in an external client do not describe the running app's settings.
+## Schema version 2: multiple extraction sources and image queue
+
+Version 2 rebuilds `documents` with `kind TEXT NOT NULL`, constrained to `text`, `image_text`, and `image_description`, and `UNIQUE(file_id,kind)` in place of unique file_id. Existing documents become `text`; document/chunk IDs and FTS contents are preserved. Foreign keys are disabled outside the migration transaction only for this parent-table rebuild, checked before commit, and re-enabled afterward. Version 0 installs version 1 then migrates to version 2; versions newer than 2 are rejected.
+
+New persistent tables:
+
+- `image_jobs`: file_id primary/foreign key (cascade delete), source_hash, model, version, state (pending/running/done/failed/skipped), attempts, retry_at (Unix seconds), detail. One current job per image; version identifies extraction prompt/processing behavior.
+- `image_cache`: composite primary key (source_hash,model,version), extracted_text, description. Duplicate images reuse outputs. Unreferenced entries are removed during discovery; cache cleanup is not forensic secure erasure of SQLite/WAL pages.
+- `image_usage`: day primary key (Unix UTC day number), requests. Reservations increment in the same short transaction that marks a job running. Retries and uncertain/interrupted requests count toward the cap.
+
+Successful extraction publishes both image document kinds and their chunks in one transaction. Text reconciliation only modifies kind=text. Source hash and current folder/model settings are checked again after network work; stale results are not published. API calls hold no database transaction. Startup marks running jobs failed for explicit retry, avoiding silent duplicate charges. All search connections remain read-only; short writer transactions from discovery and the image worker serialize through SQLite.
+
+Transcription and description chunks remain separate: an AND query must match within a single chunk/source, not partly in transcription and partly in description. Search still deduplicates result rows by file, showing the first ranked matching source. No vector tables or embedding logic have been added.

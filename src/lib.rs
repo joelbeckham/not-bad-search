@@ -5,9 +5,14 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 mod content;
+pub mod credentials;
+pub mod images;
+pub mod inspection;
 mod query;
 mod storage;
 pub use storage::{open_db, open_reader, open_writer};
+
+pub const DEFAULT_IMAGE_MODEL: &str = "gpt-6.1-terra";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -17,6 +22,10 @@ pub struct Config {
     pub reconcile_seconds: u64,
     pub content_folders: Vec<PathBuf>,
     pub max_content_bytes: u64,
+    pub image_folders: Vec<PathBuf>,
+    pub image_model: String,
+    pub image_daily_requests: u32,
+    pub images_paused: bool,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -31,12 +40,24 @@ impl Default for Config {
             reconcile_seconds: 30,
             content_folders: vec![],
             max_content_bytes: 2 * 1024 * 1024,
+            image_folders: vec![],
+            image_model: DEFAULT_IMAGE_MODEL.into(),
+            image_daily_requests: 100,
+            images_paused: false,
         }
     }
 }
 impl Config {
     pub fn validate(&self) -> Result<()> {
         self.matcher()?;
+        if self.image_model.trim().is_empty() || self.image_model.len() > 100 {
+            bail!("Choose an image model");
+        }
+        for root in &self.image_folders {
+            if !self.folders.contains(root) {
+                bail!("Image folder must also be selected: {}", root.display());
+            }
+        }
         if self.max_content_bytes == 0 || self.max_content_bytes > 64 * 1024 * 1024 {
             bail!("Text size limit must be between 1 byte and 64 MiB");
         }
@@ -228,6 +249,7 @@ pub fn reconcile(db: &mut Connection, config: &Config) -> Result<Vec<String>> {
         }
     }
     errors.extend(content::index(db, config)?);
+    images::discover(db, config)?;
     Ok(errors)
 }
 
