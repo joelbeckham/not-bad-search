@@ -8,7 +8,7 @@ Launch `target\release\good-search.exe`. On first launch, enter the folders to i
 
 - **Ctrl+Alt+Space** shows and focuses the search window globally.
 - Opening Good Search again reopens its existing window, including when hidden. Only one instance runs per data directory.
-- The borderless window keeps results full width, with Settings and key hints in the footer. Drag the search icon to move the window.
+- The borderless window keeps results full width, with Settings and key hints in the footer. The window centers in the mouse pointer monitor's work area on startup, hotkey activation, and reopening an existing instance.
 - Search terms are combined with AND: `project budget` finds both, in either order. Quotes group phrases: `"project budget" approval` requires the phrase plus approval. An unfinished quote extends to the end of input. Content terms must occur in the same chunk; filename terms are literal substrings. A single one/two-character filename term still uses prefix matching. Matching is case insensitive; content phrases follow token boundaries rather than exact punctuation. Other operators and wildcard syntax are treated literally.
 - While the current query is pending, the window shows **Searching...**. **No results** appears only after that query completes. Clearing the search clears results immediately.
 - Ctrl+C, Ctrl+X, and Ctrl+V use the Windows clipboard in Search, Selected folders, and Exclusions.

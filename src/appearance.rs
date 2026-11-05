@@ -52,7 +52,7 @@ impl App {
             )
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
-                    let (icon, drag) = ui.allocate_exact_size(Vec2::splat(28.), Sense::drag());
+                    let (icon, _) = ui.allocate_exact_size(Vec2::splat(28.), Sense::hover());
                     let center = icon.center();
                     ui.painter().circle_stroke(
                         center - Vec2::splat(3.),
@@ -63,10 +63,6 @@ impl App {
                         [center + Vec2::splat(2.), center + Vec2::splat(10.)],
                         Stroke::new(2., ACCENT),
                     );
-                    if drag.drag_started() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                    }
-                    drag.on_hover_text("Drag to move Good Search");
                     ui.add_space(8.);
                     if let Some(preview) = &self.preview {
                         let title = if self.settings {

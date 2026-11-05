@@ -3,9 +3,50 @@ use eframe::egui;
 use std::sync::mpsc;
 use windows_sys::Win32::{
     Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, HWND, LPARAM},
+    Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST},
     System::Threading::*,
-    UI::{Input::KeyboardAndMouse::*, WindowsAndMessaging::*},
+    UI::{HiDpi::*, Input::KeyboardAndMouse::*, WindowsAndMessaging::*},
 };
+
+/// Center within the pointer's monitor work area (excluding taskbars).
+/// Physical coordinates also work when a second, not-yet-DPI-aware process summons us.
+pub fn center_window(window: isize) {
+    unsafe {
+        let previous = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        let mut cursor = std::mem::zeroed();
+        let mut monitor: MONITORINFO = std::mem::zeroed();
+        monitor.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetCursorPos(&mut cursor) != 0
+            && GetMonitorInfoW(
+                MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST),
+                &mut monitor,
+            ) != 0
+        {
+            // Crossing monitors can resize a per-monitor-DPI window; recalculate after that move.
+            for _ in 0..2 {
+                let mut rect = std::mem::zeroed();
+                if GetWindowRect(window as HWND, &mut rect) == 0 {
+                    break;
+                }
+                let area = monitor.rcWork;
+                let width = rect.right - rect.left;
+                let height = rect.bottom - rect.top;
+                SetWindowPos(
+                    window as HWND,
+                    std::ptr::null_mut(),
+                    area.left + ((area.right - area.left - width) / 2).max(0),
+                    area.top + ((area.bottom - area.top - height) / 2).max(0),
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
+        }
+        if !previous.is_null() {
+            SetThreadDpiAwarenessContext(previous);
+        }
+    }
+}
 
 /// One window per Windows-local data directory. Isolated test profiles can coexist.
 pub struct Instance {
@@ -46,6 +87,7 @@ impl Instance {
                     EnumWindows(Some(find_instance), &mut lookup as *mut Lookup as LPARAM);
                     if !lookup.window.is_null() {
                         ShowWindowAsync(lookup.window, SW_RESTORE);
+                        center_window(lookup.window as isize);
                         SetForegroundWindow(lookup.window);
                         return Ok(None);
                     }
@@ -121,11 +163,23 @@ impl Hotkey {
             let mut msg = std::mem::zeroed();
             while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
                 if msg.message == WM_HOTKEY {
+                    let debug_path = std::env::var_os("GOOD_SEARCH_DATA")
+                        .map(|p| std::path::PathBuf::from(p).join("worker-trace.log"));
+                    if let Some(path) = &debug_path {
+                        crate::trace(path, "hotkey received");
+                    }
                     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                     let hwnd = window as windows_sys::Win32::Foundation::HWND;
                     if !hwnd.is_null() {
                         ShowWindow(hwnd, SW_RESTORE);
+                        if let Some(path) = &debug_path {
+                            crate::trace(path, "hotkey restored");
+                        }
+                        center_window(window);
+                        if let Some(path) = &debug_path {
+                            crate::trace(path, "hotkey centered");
+                        }
                         SetForegroundWindow(hwnd);
                     }
                     ctx.request_repaint();

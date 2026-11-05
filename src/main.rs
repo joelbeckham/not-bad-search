@@ -240,6 +240,7 @@ fn run() -> Result<()> {
         });
         let window=match cc.window_handle()?.as_raw() {RawWindowHandle::Win32(h)=>h.hwnd.get(),_=>return Err("Windows window handle unavailable".into())};
         instance.attach(window)?;
+        platform::center_window(window);
         let (hotkey,error)=match platform::Hotkey::register(cc.egui_ctx.clone(),window) {Ok(h)=>(Some(h),String::new()),Err(e)=>(None,e.to_string())};
         Ok(Box::new(App {preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,folders:config.folders.iter().map(|p|p.to_string_lossy()).collect::<Vec<_>>().join("\n"), exclusions:config.exclusions.join("\n"), image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.folders.is_empty(), content_folders:config.content_folders.clone(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
     })).map_err(|e|anyhow::anyhow!(e.to_string()))?;
