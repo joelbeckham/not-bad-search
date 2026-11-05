@@ -496,20 +496,13 @@ impl App {
                             egui::ComboBox::from_id_salt("image_analysis_model")
                                 .selected_text(match self.config.image_model.as_str() {
                                     good_search::DEFAULT_IMAGE_MODEL => "GPT-6.1 Terra (default)",
-                                    "gpt-5.6-terra" => "GPT-5.6 Terra",
-                                    _ => "Custom model",
+                                    "gpt-6-luna" => "GPT-6 Luna",
+                                    _ => "Choose a model",
                                 })
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(&mut self.config.image_model, good_search::DEFAULT_IMAGE_MODEL.into(), "GPT-6.1 Terra (default)");
-                                    ui.selectable_value(&mut self.config.image_model, "gpt-5.6-terra".into(), "GPT-5.6 Terra");
-                                    if ui.selectable_label(!matches!(self.config.image_model.as_str(), good_search::DEFAULT_IMAGE_MODEL | "gpt-5.6-terra"), "Custom model").clicked() {
-                                        self.config.image_model.clear();
-                                    }
+                                    ui.selectable_value(&mut self.config.image_model, "gpt-6-luna".into(), "GPT-6 Luna");
                                 });
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("API model ID");
-                            ui.add(egui::TextEdit::singleline(&mut self.config.image_model).hint_text(good_search::DEFAULT_IMAGE_MODEL));
                         });
                         ui.label("Apply with Save changes. Changing models reanalyzes selected images and uses your daily request cap.");
                         ui.horizontal(|ui| {

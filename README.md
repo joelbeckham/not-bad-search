@@ -95,7 +95,7 @@ The script creates isolated Markdown fixtures, verifies repeated content search 
 
 ## Image indexing
 
-In Settings, select image folders under **Search inside images with OpenAI**, store an API key, choose a model and daily request cap, then **Save changes**. Image opt-ins are separate from text-file opt-ins. PNG, JPEG and WebP are supported, up to 10 MiB and 20 megapixels per image. The model defaults to `gpt-6.1-terra`. Use the Image analysis model selector in Settings or enter a custom API model ID, then Save changes. Existing explicitly saved model choices are preserved; changing the model reanalyzes selected images within the daily request cap. Availability depends on your OpenAI project.
+In Settings, select image folders under **Search inside images with OpenAI**, store an API key, choose a model and daily request cap, then **Save changes**. Image opt-ins are separate from text-file opt-ins. PNG, JPEG and WebP are supported, up to 10 MiB and 20 megapixels per image. The model defaults to `gpt-6.1-terra`. The Image analysis model selector offers GPT-6.1 Terra and GPT-6 Luna. Select one, then Save changes. Existing explicitly saved model choices are preserved; changing the model reanalyzes selected images within the daily request cap. Availability depends on your OpenAI project.
 
 One request returns faithful extracted text and a separate visual description. Results are labeled **Image text** or **Image description**. Both use the existing local AND/phrase search. Images themselves are not stored in SQLite; cached extracted text and descriptions are.
 
