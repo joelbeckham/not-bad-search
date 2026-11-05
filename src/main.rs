@@ -2,6 +2,7 @@
 mod appearance;
 mod inspector_ui;
 mod platform;
+mod preview_ui;
 use anyhow::{Context, Result};
 use eframe::egui;
 use good_search::{open_db, open_reader, open_writer, reconcile, search, Config, Hit};
@@ -33,6 +34,8 @@ fn trace(path: &std::path::Path, message: &str) {
     }
 }
 struct App {
+    preview: Option<preview_ui::Preview>,
+    preview_loader: Option<preview_ui::Loader>,
     inspector: Option<inspector_ui::Inspector>,
     _instance: platform::Instance,
     submitted_query: String,
@@ -238,7 +241,7 @@ fn run() -> Result<()> {
         let window=match cc.window_handle()?.as_raw() {RawWindowHandle::Win32(h)=>h.hwnd.get(),_=>return Err("Windows window handle unavailable".into())};
         instance.attach(window)?;
         let (hotkey,error)=match platform::Hotkey::register(cc.egui_ctx.clone(),window) {Ok(h)=>(Some(h),String::new()),Err(e)=>(None,e.to_string())};
-        Ok(Box::new(App {inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,folders:config.folders.iter().map(|p|p.to_string_lossy()).collect::<Vec<_>>().join("\n"), exclusions:config.exclusions.join("\n"), image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.folders.is_empty(), content_folders:config.content_folders.clone(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
+        Ok(Box::new(App {preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,folders:config.folders.iter().map(|p|p.to_string_lossy()).collect::<Vec<_>>().join("\n"), exclusions:config.exclusions.join("\n"), image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.folders.is_empty(), content_folders:config.content_folders.clone(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
     })).map_err(|e|anyhow::anyhow!(e.to_string()))?;
     Ok(())
 }
@@ -246,8 +249,16 @@ impl App {
     fn back(&mut self) {
         if self.settings {
             self.settings = false;
-        } else {
+        } else if self.inspector.is_some() {
             self.inspector = None;
+        } else if let Some(preview) = self.preview.take() {
+            let path = &preview.items[preview.selected].path;
+            if let Some(index) = self.hits.iter().position(|hit| &hit.path == path) {
+                self.selected = index;
+            }
+            if let Some(loader) = &mut self.preview_loader {
+                loader.cancel();
+            }
         }
         self.focus = !self.settings;
     }
@@ -373,7 +384,7 @@ impl eframe::App for App {
             self.focus = false;
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-            if self.inspector.is_some() || self.settings {
+            if self.inspector.is_some() || self.settings || self.preview.is_some() {
                 self.back();
             } else if !self.query.is_empty() {
                 self.query.clear();

@@ -72,7 +72,7 @@ try {
  [DesignProbe]::mouse_event(16,0,0,0,[UIntPtr]::Zero)
  Start-Sleep -Milliseconds 300
  Capture 'context-menu'
- [DesignProbe]::Click($script:h,90,158)
+ [DesignProbe]::Click($script:h,90,180)
  Start-Sleep -Seconds 1
  Capture 'inspector'
  [Windows.Forms.SendKeys]::SendWait('^,');Start-Sleep -Milliseconds 300
@@ -89,7 +89,7 @@ try {
  Start-Sleep -Milliseconds 80
  [DesignProbe]::mouse_event(16,0,0,0,[UIntPtr]::Zero)
  Start-Sleep -Milliseconds 300
- [DesignProbe]::Click($script:h,90,158)
+ [DesignProbe]::Click($script:h,90,180)
  Start-Sleep -Milliseconds 500
  if([DesignProbe]::GetForegroundWindow() -ne $script:h){throw 'Focus lost before inspector Escape'}
  [Windows.Forms.SendKeys]::SendWait('{ESC}')

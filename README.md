@@ -12,9 +12,9 @@ Launch `target\release\good-search.exe`. On first launch, enter the folders to i
 - Search terms are combined with AND: `project budget` finds both, in either order. Quotes group phrases: `"project budget" approval` requires the phrase plus approval. An unfinished quote extends to the end of input. Content terms must occur in the same chunk; filename terms are literal substrings. A single one/two-character filename term still uses prefix matching. Matching is case insensitive; content phrases follow token boundaries rather than exact punctuation. Other operators and wildcard syntax are treated literally.
 - While the current query is pending, the window shows **Searching...**. **No results** appears only after that query completes. Clearing the search clears results immediately.
 - Ctrl+C, Ctrl+X, and Ctrl+V use the Windows clipboard in Search, Selected folders, and Exclusions.
-- Up/down select a result; Enter or double-click opens it with its Windows default application.
+- Up/down select a result. Enter or a click opens a full-window preview; Ctrl+Enter opens the file directly. In preview, Up/Down browse results, Enter opens the current file in its default application, and Escape returns to the list. The scroll wheel scrolls preview content.
 - Ctrl+, opens Settings from search or Indexed data. Back/Escape returns to the previous screen.
-- Escape returns from Settings or Indexed data to the previous screen, clears a nonempty search, or hides an empty search window. Alt+F4 hides the window. **Settings > Quit Good Search** exits the process.
+- Escape returns from Settings, Indexed data or Preview to the previous screen, clears a nonempty search, or hides an empty search window. Alt+F4 hides the window. **Settings > Quit Good Search** exits the process.
 - If another program owns the hotkey, the app displays an error and keeps normal close behavior so it remains usable.
 - Escape on an empty search still hides the window when the hotkey is unavailable; launch Good Search again to recover the hidden window.
 
@@ -108,3 +108,7 @@ The API key is stored as the current Windows user's generic credential `GoodSear
 For a synthetic live API check only (one request maximum): create an image containing the word `marmalade`, then run `diagnostics image-test NEW_DB FIXTURE_FOLDER`. `diagnostics store-key-file PRIVATE_FILE` can import a key without placing its value in command arguments; the app's masked Settings field is the normal setup flow.
 
 Right-click a search result for **Inspect indexed data**, **Copy path**, or **Open file**. The inspector fills the main content area like Settings, with Back to search in the footer. It displays a read-only local snapshot: all stored file fields, each extracted document and its chunks, image job metadata/errors, and the matching cached transcription/description. Expand sections to read full text; select/copy text or use **Copy all as JSON**. **Refresh** reloads the snapshot without reindexing or contacting OpenAI. Escape returns from the inspector to the previous screen, preserving the search. A removed file produces an explanatory message.
+
+## File previews
+
+Previews read the current file locally in one background worker; no OpenAI calls are made. PNG, JPEG and WebP images fit the window (up to 32 MiB / 40 megapixels, downscaled to 1600 pixels for display). UTF-8 text and raw Markdown show line numbers and highlighted search terms, initially scrolled near the first match. Text previews are limited to 2 MiB, 20,000 lines and 8 KiB per line; partial previews are labeled. Unsupported, missing or unreadable files show an explanation and can still be opened in their default application. Up/Down browse a snapshot of the results so background indexing cannot shift the preview order. Ctrl+, opens Settings and Back/Escape returns to the preview.

@@ -8,6 +8,7 @@ mod content;
 pub mod credentials;
 pub mod images;
 pub mod inspection;
+pub mod preview;
 mod query;
 mod storage;
 pub use storage::{open_db, open_reader, open_writer};

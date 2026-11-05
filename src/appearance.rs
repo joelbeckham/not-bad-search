@@ -68,6 +68,17 @@ impl App {
                     }
                     drag.on_hover_text("Drag to move Good Search");
                     ui.add_space(8.);
+                    if let Some(preview) = &self.preview {
+                        let title = if self.settings {
+                            "Settings"
+                        } else {
+                            &preview.items[preview.selected].name
+                        };
+                        ui.add(
+                            egui::Label::new(RichText::new(title).size(21.).color(TEXT)).truncate(),
+                        );
+                        return;
+                    }
                     if self.inspector.is_some() && !self.settings {
                         ui.label(RichText::new("Indexed data").size(21.).color(TEXT));
                         return;
@@ -107,7 +118,9 @@ impl App {
                 ui.horizontal_centered(|ui| {
                     let label = if self.settings && self.inspector.is_some() {
                         "Back to indexed data"
-                    } else if self.settings || self.inspector.is_some() {
+                    } else if self.settings && self.preview.is_some() {
+                        "Back to preview"
+                    } else if self.settings || self.inspector.is_some() || self.preview.is_some() {
                         "‹  Back to search"
                     } else {
                         "Settings (Ctrl+,)"
@@ -119,7 +132,7 @@ impl App {
                         )
                         .clicked()
                     {
-                        if self.inspector.is_some() || self.settings {
+                        if self.inspector.is_some() || self.settings || self.preview.is_some() {
                             self.back();
                         } else {
                             self.settings = true;
@@ -134,6 +147,8 @@ impl App {
                             key(ui, "Esc");
                             let back_label = if self.inspector.is_some() {
                                 "Back to indexed data"
+                            } else if self.preview.is_some() {
+                                "Back to preview"
                             } else {
                                 "Back to search"
                             };
@@ -156,13 +171,23 @@ impl App {
                             );
                         } else {
                             key(ui, "Enter");
-                            ui.label(RichText::new("Open").size(12.).color(MUTED));
+                            ui.label(
+                                RichText::new(if self.preview.is_some() {
+                                    "Open file"
+                                } else {
+                                    "Preview"
+                                })
+                                .size(12.)
+                                .color(MUTED),
+                            );
                             ui.add_space(12.);
                             key(ui, "Up / Down");
                             ui.label(RichText::new("Navigate").size(12.).color(MUTED));
                             ui.add_space(12.);
                             key(ui, "Esc");
-                            let action = if self.query.is_empty() {
+                            let action = if self.preview.is_some() {
+                                "Back to search"
+                            } else if self.query.is_empty() {
                                 "Hide"
                             } else {
                                 "Clear search"
@@ -181,6 +206,10 @@ impl App {
                 }
                 if self.settings {
                     self.draw_settings(ui);
+                    return;
+                }
+                if self.preview.is_some() {
+                    self.draw_preview(ui);
                     return;
                 }
                 if !self.error.is_empty() {
@@ -234,7 +263,9 @@ impl App {
                 }
                 let mut open = None;
                 let mut inspect = None;
+                let mut preview = false;
                 egui::ScrollArea::vertical()
+                    .id_salt("search_results")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for (index, hit) in self.hits.iter().enumerate() {
@@ -285,6 +316,7 @@ impl App {
                             );
                             let mut row_ui = ui.new_child(
                                 egui::UiBuilder::new()
+                                    .sense(Sense::hover())
                                     .max_rect(text_rect)
                                     .layout(Layout::top_down(Align::Min)),
                             );
@@ -292,14 +324,14 @@ impl App {
                             row_ui.spacing_mut().item_spacing.y = 3.;
                             row_ui.add(
                                 egui::Label::new(RichText::new(&hit.name).size(16.).color(TEXT))
-                                    .truncate(),
+                                    .truncate().sense(Sense::hover()),
                             );
                             row_ui.add(
                                 egui::Label::new(RichText::new(&hit.path).size(11.).color(MUTED))
-                                    .truncate(),
+                                    .truncate().sense(Sense::hover()),
                             );
                             if let Some(snippet) = &hit.snippet {
-                                row_ui.add(egui::Label::new(RichText::new(snippet).size(12.).color(ACCENT)).truncate());
+                                row_ui.add(egui::Label::new(RichText::new(snippet).size(12.).color(ACCENT)).truncate().sense(Sense::hover()));
                             }
                             ui.painter().text(
                                 rect.right_center() - Vec2::new(15., 0.),
@@ -310,15 +342,14 @@ impl App {
                             );
                             if response.secondary_clicked() { self.selected=index; }
                             response.context_menu(|ui| {
+                                if ui.button("Preview").clicked() { self.selected=index; preview=true;ui.close(); }
                                 if ui.button("Inspect indexed data").clicked() {inspect=Some(hit.path.clone());ui.close();}
                                 if ui.button("Copy path").clicked() {ctx.copy_text(hit.path.clone());ui.close();}
                                 if ui.button("Open file").clicked() {open=Some(hit.path.clone());ui.close();}
                             });
                             if response.clicked() {
                                 self.selected = index;
-                            }
-                            if response.double_clicked() {
-                                open = Some(hit.path.clone());
+                                preview = true;
                             }
                             if moved && selected {
                                 response.scroll_to_me(Some(Align::Center));
@@ -352,12 +383,19 @@ impl App {
                             });
                         }
                     });
-                if self.inspector.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    open = self.hits.get(self.selected).map(|h| h.path.clone());
+                if crate::preview_ui::fresh_enter(&ctx) {
+                    if ctx.input(|i| i.modifiers.ctrl) {
+                        open = self.hits.get(self.selected).map(|h| h.path.clone());
+                    } else {
+                        preview = true;
+                    }
                 }
+                if preview { self.start_preview(&ctx); }
                 if let Some(path) = inspect { self.inspect_file(path); }
                 if let Some(path) = open {
-                    if let Err(e) = crate::platform::open_file(&path) {
+                    let result = crate::platform::open_file(&path);
+                    crate::trace(&self.config_path.with_file_name("worker-trace.log"), &format!("direct open path={path:?} success={}", result.is_ok()));
+                    if let Err(e) = result {
                         self.error = e.to_string();
                     }
                 }
