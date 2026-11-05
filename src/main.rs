@@ -193,6 +193,7 @@ fn run() -> Result<()> {
     };
     eframe::run_native("Good Search",options,Box::new(move |cc| {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         let (tx,events)=mpsc::channel();
         let pending=Arc::new(Mutex::new(None::<(u64,String,SearchFilters)>));
         let (wake,rx)=mpsc::sync_channel(1);

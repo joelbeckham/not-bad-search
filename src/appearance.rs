@@ -296,24 +296,11 @@ impl App {
                                 );
                             }
                             let icon = egui::Rect::from_min_size(
-                                rect.min + Vec2::new(16., 18.),
-                                Vec2::new(17., 22.),
+                                rect.min + Vec2::new(14., 18.),
+                                Vec2::splat(22.),
                             );
-                            ui.painter().rect_stroke(
-                                icon,
-                                2,
-                                Stroke::new(1.3, if selected { ACCENT } else { MUTED }),
-                                egui::StrokeKind::Inside,
-                            );
-                            for offset in [8., 12., 16.] {
-                                ui.painter().line_segment(
-                                    [
-                                        icon.min + Vec2::new(4., offset),
-                                        icon.min + Vec2::new(13., offset),
-                                    ],
-                                    Stroke::new(1., MUTED),
-                                );
-                            }
+                            let (uri, bytes) = good_search::file_icons::icon(&hit.name);
+                            egui::Image::from_bytes(uri, bytes).paint_at(ui, icon);
                             let ext = std::path::Path::new(&hit.name)
                                 .extension()
                                 .and_then(|s| s.to_str())

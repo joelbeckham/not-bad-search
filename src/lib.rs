@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 mod content;
 pub mod credentials;
+pub mod file_icons;
 pub mod images;
 pub mod inspection;
 pub mod preview;
