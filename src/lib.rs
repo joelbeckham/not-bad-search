@@ -10,6 +10,7 @@ pub mod images;
 pub mod inspection;
 pub mod preview;
 mod query;
+pub mod semantic;
 mod storage;
 pub use storage::{open_db, open_reader, open_writer};
 
@@ -18,6 +19,8 @@ pub const DEFAULT_IMAGE_MODEL: &str = "gpt-6.1-terra";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    pub semantic_enabled: bool,
+    pub semantic_delay_ms: u64,
     pub folders: Vec<PathBuf>,
     pub exclusions: Vec<String>,
     pub reconcile_seconds: u64,
@@ -31,6 +34,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            semantic_enabled: true,
+            semantic_delay_ms: 200,
             folders: vec![],
             exclusions: vec![
                 ".git".into(),
@@ -50,6 +55,9 @@ impl Default for Config {
 }
 impl Config {
     pub fn validate(&self) -> Result<()> {
+        if !(50..=2000).contains(&self.semantic_delay_ms) {
+            bail!("Semantic search delay must be between 50 and 2000 ms");
+        }
         self.matcher()?;
         if self.image_model.trim().is_empty() || self.image_model.len() > 100 {
             bail!("Choose an image model");

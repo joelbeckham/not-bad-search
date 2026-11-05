@@ -6,7 +6,7 @@ Executable definitions: [schema.sql](../src/schema.sql). Migrations and connecti
 
 The Windows-local database is `%LOCALAPPDATA%\GoodSearch\index.sqlite`. `GOOD_SEARCH_DATA` overrides the directory. WSL UNC paths are sources only. Configuration lives in `config.toml` beside the index.
 
-`PRAGMA user_version = 2` identifies this schema. Startup adopts the original unversioned filename index (version 0) and creates content tables in one transaction, preserving filename rows. Workers start after migration. Newer versions are rejected. Future changes require numbered migrations.
+`PRAGMA user_version = 3` identifies this schema. Startup adopts the original unversioned filename index (version 0) and creates content tables in one transaction, preserving filename rows. Workers start after migration. Newer versions are rejected. Future changes require numbered migrations.
 
 ## Tables and columns
 
@@ -61,7 +61,7 @@ The index.sqlite-wal and index.sqlite-shm files belong with the database. For an
 
 ## Future embeddings
 
-No vector tables, vector extension or embedding calls exist. Image extraction uses OpenAI during indexing only. Future vectors should reference chunk identity and content revision, with model/version/dimensions/metric metadata. Do not mix incompatible embedding spaces. Replacing chunks must invalidate vectors transactionally, or via durable synchronization for an external index. Local semantic queries also require local query embeddings.
+Version 3 implements local chunk and query embeddings with model/revision namespaces and transactional invalidation; see the version 3 section below. No vector extension is required. Image extraction still uses OpenAI during indexing only.
 
 ## Read-only inspection
 
@@ -79,7 +79,7 @@ SELECT f.path,d.detail FROM documents d JOIN files f ON f.id=d.file_id WHERE d.s
 Connection-specific pragmas in an external client do not describe the running app's settings.
 ## Schema version 2: multiple extraction sources and image queue
 
-Version 2 rebuilds `documents` with `kind TEXT NOT NULL`, constrained to `text`, `image_text`, and `image_description`, and `UNIQUE(file_id,kind)` in place of unique file_id. Existing documents become `text`; document/chunk IDs and FTS contents are preserved. Foreign keys are disabled outside the migration transaction only for this parent-table rebuild, checked before commit, and re-enabled afterward. Version 0 installs version 1 then migrates to version 2; versions newer than 2 are rejected.
+Version 2 rebuilds `documents` with `kind TEXT NOT NULL`, constrained to `text`, `image_text`, and `image_description`, and `UNIQUE(file_id,kind)` in place of unique file_id. Existing documents become `text`; document/chunk IDs and FTS contents are preserved. Foreign keys are disabled outside the migration transaction only for this parent-table rebuild, checked before commit, and re-enabled afterward. Version 0 installs version 1, then migrations 2 and 3. Versions newer than 3 are rejected.
 
 New persistent tables:
 
@@ -89,4 +89,22 @@ New persistent tables:
 
 Successful extraction publishes both image document kinds and their chunks in one transaction. Text reconciliation only modifies kind=text. Source hash and current folder/model settings are checked again after network work; stale results are not published. API calls hold no database transaction. Startup marks running jobs failed for explicit retry, avoiding silent duplicate charges. All search connections remain read-only; short writer transactions from discovery and the image worker serialize through SQLite.
 
-Transcription and description chunks remain separate: an AND query must match within a single chunk/source, not partly in transcription and partly in description. Search still deduplicates result rows by file, showing the first ranked matching source. No vector tables or embedding logic have been added.
+Transcription and description chunks remain separate: an AND query must match within a single chunk/source, not partly in transcription and partly in description. Search still deduplicates result rows by file, showing the first ranked matching source. Version 3 adds embeddings of these chunks as described below.
+
+## Version 3: local semantic embeddings
+
+Migration: `src/schema-v3.sql`. Adds `embeddings` without changing existing file/document/chunk IDs or FTS tables.
+
+| Column | Meaning |
+| --- | --- |
+| `chunk_id INTEGER` | Foreign key to `chunks.id`, cascading delete |
+| `model TEXT` | Model revision and input recipe namespace; currently `potion-base-8M/bf8b0566/heading-body-v1` |
+| `content_hash TEXT` | Chunk hash at embedding time |
+| `dimensions INTEGER` | 256 for the current model |
+| `vector BLOB` | Normalized little-endian float32 values; exactly dimensions × 4 bytes |
+
+Primary key: `(chunk_id, model)`. A length check rejects malformed blobs; reads reject non-finite vectors and mismatched dimensions. `embeddings_chunk_update` deletes vectors on any chunk update; foreign-key cascades remove them when chunks/documents/files are removed. Publishing a batch revalidates chunk ID, hash, heading, body and ready status after inference, preventing a changed file from receiving stale vectors.
+
+The model ID includes a pinned model revision and input-format version. Vectors from another model namespace are never mixed. Current input is heading plus body, capped at 4096 tokens; query text is limited to 2048 characters. Zero vectors are stored but never produce semantic matches. The inspector includes embedding metadata per chunk (binary vectors are represented by their byte length in the JSON snapshot).
+
+Retrieval uses an in-memory snapshot, refreshed when the read connection's `PRAGMA data_version` changes. It scores chunks by cosine similarity, selects the best chunk per file, and rechecks stored/current hashes when loading result metadata. Hybrid ranking combines lexical and semantic ranks; it is not an LLM or cross-encoder reranker. Quoted queries do not gain semantic-only candidates. ANN/vector extensions are not needed at the current scale; exact scanning should be revisited if the vector count grows substantially.

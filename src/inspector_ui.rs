@@ -113,7 +113,14 @@ fn section(ui: &mut egui::Ui, title: &str, value: &Value, expanded: bool) {
                                 ui.push_id(i, |ui| {
                                     section(
                                         ui,
-                                        &format!("Chunk {}", entry["ordinal"]),
+                                        &if name == "embeddings" {
+                                            entry["model"]
+                                                .as_str()
+                                                .unwrap_or("Embedding")
+                                                .to_owned()
+                                        } else {
+                                            format!("Chunk {}", entry["ordinal"])
+                                        },
                                         entry,
                                         false,
                                     );

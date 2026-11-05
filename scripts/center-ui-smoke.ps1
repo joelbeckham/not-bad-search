@@ -43,7 +43,7 @@ public class CenterProbe {
 $base=[IO.Path]::GetFullPath("$PSScriptRoot\..\test-data\center-$([guid]::NewGuid().ToString('N'))")
 $data=Join-Path $base 'data';$files=Join-Path $base 'files'
 New-Item -ItemType Directory -Path $data,$files | Out-Null
-@("folders = ['$files']",'reconcile_seconds = 300')|Set-Content "$data\config.toml"
+@("folders = ['$files']",'semantic_enabled = false','reconcile_seconds = 300')|Set-Content "$data\config.toml"
 $old=$env:GOOD_SEARCH_DATA;$env:GOOD_SEARCH_DATA=$data;$env:GOOD_SEARCH_TRACE='1';$env:GOOD_SEARCH_WORKER_TRACE='1'
 $proc=Start-Process -FilePath $Exe -PassThru
 function Check-Center([string]$stage){

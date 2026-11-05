@@ -34,6 +34,7 @@ folders = ['$files']
 image_folders = ['$files']
 image_model = "gpt-5.6-terra"
 image_daily_requests = 0
+semantic_enabled = false
 reconcile_seconds = 30
 "@ | Set-Content "$data\config.toml"
 $old=$env:GOOD_SEARCH_DATA;$env:GOOD_SEARCH_DATA=$data

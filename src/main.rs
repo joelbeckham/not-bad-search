@@ -3,6 +3,7 @@ mod appearance;
 mod inspector_ui;
 mod platform;
 mod preview_ui;
+mod semantic_worker;
 use anyhow::{Context, Result};
 use eframe::egui;
 use good_search::{open_db, open_reader, open_writer, reconcile, search, Config, Hit};
@@ -15,6 +16,8 @@ use std::{
 };
 
 enum Event {
+    SemanticResults(u64, String, std::result::Result<Vec<Hit>, String>, Duration),
+    SemanticStatus(String, bool, bool),
     Results(u64, String, Vec<Hit>, Duration),
     SearchFailed(u64, String),
     Status(String),
@@ -34,6 +37,13 @@ fn trace(path: &std::path::Path, message: &str) {
     }
 }
 struct App {
+    semantic: semantic_worker::Worker,
+    semantic_status: String,
+    semantic_ready: bool,
+    semantic_due: Option<Instant>,
+    semantic_pending: bool,
+    semantic_hits: Option<Vec<Hit>>,
+    lexical_hits: Vec<Hit>,
     preview: Option<preview_ui::Preview>,
     preview_loader: Option<preview_ui::Loader>,
     inspector: Option<inspector_ui::Inspector>,
@@ -195,6 +205,7 @@ fn run() -> Result<()> {
             }
         });
         let shared_config=Arc::new(Mutex::new(config.clone()));
+        let semantic=semantic_worker::Worker::start(db_path.clone(),shared_config.clone(),tx.clone(),cc.egui_ctx.clone());
         let image_wake=start_image_worker(db_path.clone(),shared_config.clone(),tx.clone(),cc.egui_ctx.clone());
         let image_notify=image_wake.clone();
         let (index_wake,index_rx)=mpsc::sync_channel(1);
@@ -242,7 +253,7 @@ fn run() -> Result<()> {
         instance.attach(window)?;
         platform::center_window(window);
         let (hotkey,error)=match platform::Hotkey::register(cc.egui_ctx.clone(),window) {Ok(h)=>(Some(h),String::new()),Err(e)=>(None,e.to_string())};
-        Ok(Box::new(App {preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,folders:config.folders.iter().map(|p|p.to_string_lossy()).collect::<Vec<_>>().join("\n"), exclusions:config.exclusions.join("\n"), image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.folders.is_empty(), content_folders:config.content_folders.clone(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
+        Ok(Box::new(App {semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,folders:config.folders.iter().map(|p|p.to_string_lossy()).collect::<Vec<_>>().join("\n"), exclusions:config.exclusions.join("\n"), image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.folders.is_empty(), content_folders:config.content_folders.clone(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
     })).map_err(|e|anyhow::anyhow!(e.to_string()))?;
     Ok(())
 }
@@ -265,6 +276,18 @@ impl App {
     }
 
     fn submit(&mut self) {
+        self.semantic.cancel();
+        self.semantic_hits = None;
+        self.lexical_hits.clear();
+        self.semantic_pending = false;
+        self.semantic_due = if self.config.semantic_enabled
+            && self.semantic_ready
+            && self.query.trim().chars().count() >= 3
+        {
+            Some(Instant::now() + Duration::from_millis(self.config.semantic_delay_ms))
+        } else {
+            None
+        };
         self.generation += 1;
         self.submitted_query.clone_from(&self.query);
         self.query_error = None;
@@ -325,6 +348,8 @@ impl App {
         self.error.clear();
         let _ = self.index_wake.try_send(());
         let _ = self.image_wake.try_send(false);
+        self.semantic.wake();
+        self.submit();
         Ok(())
     }
 }
@@ -342,7 +367,12 @@ impl eframe::App for App {
                         &self.config_path.with_file_name("worker-trace.log"),
                         &format!("accepted id={id} hits={}", hits.len()),
                     );
-                    self.hits = hits;
+                    self.lexical_hits = hits.clone();
+                    self.hits = if let Some(semantic) = &self.semantic_hits {
+                        good_search::semantic::merge(&query, hits, semantic.clone(), 100)
+                    } else {
+                        hits
+                    };
                     self.searching = false;
                     self.completed_generation = id;
                     self.elapsed = time;
@@ -353,6 +383,7 @@ impl eframe::App for App {
                     let done = !s.starts_with("Indexing");
                     self.status = s;
                     if done {
+                        self.semantic.wake();
                         self.submit();
                     }
                 }
@@ -360,6 +391,7 @@ impl eframe::App for App {
                 Event::ImageStatus(status, changed) => {
                     self.image_status = status;
                     if changed {
+                        self.semantic.wake();
                         self.submit();
                     }
                 }
@@ -368,6 +400,65 @@ impl eframe::App for App {
                     self.searching = false;
                     self.query_error = Some(error);
                     self.hits.clear();
+                }
+                Event::SemanticStatus(status, ready, changed) => {
+                    trace(
+                        &self.config_path.with_file_name("worker-trace.log"),
+                        &format!("semantic status ready={ready} {status}"),
+                    );
+                    self.semantic_status = status;
+                    self.semantic_ready = ready;
+                    if !ready {
+                        self.semantic_pending = false;
+                        self.semantic_due = None;
+                    }
+                    if changed
+                        && self.config.semantic_enabled
+                        && self.query.trim().chars().count() >= 3
+                        && !self.semantic_pending
+                    {
+                        self.semantic_due = Some(
+                            Instant::now() + Duration::from_millis(self.config.semantic_delay_ms),
+                        );
+                    }
+                }
+                Event::SemanticResults(id, query, result, time)
+                    if id == self.generation
+                        && query == self.query
+                        && self.config.semantic_enabled =>
+                {
+                    self.semantic_pending = false;
+                    match result {
+                        Ok(hits) => {
+                            trace(
+                                &self.config_path.with_file_name("worker-trace.log"),
+                                &format!(
+                                    "semantic accepted id={id} query={query:?} hits={} ms={:.3}",
+                                    hits.len(),
+                                    time.as_secs_f64() * 1000.
+                                ),
+                            );
+                            self.semantic_hits = Some(hits.clone());
+                            if self.completed_generation == id {
+                                let selected = self.hits.get(self.selected).map(|h| h.path.clone());
+                                self.hits = good_search::semantic::merge(
+                                    &query,
+                                    self.lexical_hits.clone(),
+                                    hits,
+                                    100,
+                                );
+                                self.selected = selected
+                                    .and_then(|p| self.hits.iter().position(|h| h.path == p))
+                                    .unwrap_or(0);
+                                self.trace_results = true;
+                            }
+                        }
+                        Err(e) => {
+                            self.semantic_status = format!(
+                            "Semantic search unavailable: {e}. Text results are still available."
+                        )
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -397,6 +488,18 @@ impl eframe::App for App {
             }
         }
         self.draw_window(ui);
+        if let Some(due) = self.semantic_due {
+            if Instant::now() >= due {
+                self.semantic_due = None;
+                self.semantic_pending = true;
+                self.semantic.request(self.generation, self.query.clone());
+            } else {
+                ctx.request_repaint_after(due.saturating_duration_since(Instant::now()));
+            }
+        }
+        if self.semantic_pending {
+            ctx.request_repaint_after(Duration::from_millis(30));
+        }
 
         self.searching =
             !self.query.trim().is_empty() && self.completed_generation != self.generation;

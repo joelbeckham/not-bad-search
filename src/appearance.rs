@@ -228,6 +228,8 @@ impl App {
                     ui.label(
                         RichText::new(if self.searching {
                             "Searching…"
+                        } else if self.semantic_pending || self.semantic_due.is_some() {
+                            "Finding related results..."
                         } else {
                             "Files"
                         })
@@ -365,7 +367,7 @@ impl App {
                                         "Find something good.",
                                         "Search filenames and enabled text content in your selected folders.",
                                     )
-                                } else if self.searching {
+                                } else if self.searching || self.semantic_pending || self.semantic_due.is_some() {
                                     ("Searching your files…", "Results will appear here.")
                                 } else if self.query_error.is_some() {
                                     (
@@ -480,6 +482,16 @@ impl App {
                                     .suffix(" MiB"),
                             );
                         });
+                        ui.add_space(12.);
+                        ui.label(RichText::new("Semantic search").size(13.));
+                        ui.checkbox(&mut self.config.semantic_enabled, "Find related content using local embeddings");
+                        ui.label("Potion 8M runs on your CPU. One-time model download: about 30 MiB. Files and searches stay on this computer.");
+                        ui.horizontal(|ui| {
+                            ui.label("Typing pause before semantic search");
+                            ui.add(egui::DragValue::new(&mut self.config.semantic_delay_ms).range(50..=2000).suffix(" ms"));
+                        });
+                        ui.label(&self.semantic_status);
+                        ui.label("Applies with Save changes. Exact text results appear immediately. Quoted phrases remain strict.");
                         ui.add_space(12.);
                         ui.label(RichText::new("Search inside images with OpenAI").size(13.));
                         ui.label("Selected image folders send PNG, JPEG and WebP images to OpenAI during indexing. API charges apply. Searches stay local.");

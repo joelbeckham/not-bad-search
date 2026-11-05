@@ -10,6 +10,21 @@ use std::{
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        Some("semantic-status") => {
+            let db = good_search::open_reader(Path::new(
+                args.get(2).context("Database path required")?,
+            ))?;
+            let chunks:i64=db.query_row("SELECT count(*) FROM chunks c JOIN documents d ON d.id=c.document_id WHERE d.status='ready'",[],|r|r.get(0))?;
+            let vectors: i64 = db.query_row(
+                "SELECT count(*) FROM embeddings WHERE model=?1",
+                [good_search::semantic::MODEL],
+                |r| r.get(0),
+            )?;
+            println!(
+                "semantic_chunks={vectors}/{chunks} model={}",
+                good_search::semantic::MODEL
+            );
+        }
         Some("image-status") => {
             let db = good_search::open_reader(Path::new(
                 args.get(2).context("Database path required")?,

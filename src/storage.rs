@@ -20,7 +20,7 @@ pub fn open_reader(path: &Path) -> Result<Connection> {
 pub fn open_db(path: &Path) -> Result<Connection> {
     let mut db = open_writer(path)?;
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version > 2 {
+    if version > 3 {
         bail!("Index schema {version} is newer than this application supports");
     }
     db.execute_batch("PRAGMA journal_mode=WAL;")?;
@@ -49,6 +49,12 @@ pub fn open_db(path: &Path) -> Result<Connection> {
         })();
         db.pragma_update(None, "foreign_keys", true)?;
         result?;
+    }
+    if version < 3 {
+        let tx = db.transaction()?;
+        tx.execute_batch(include_str!("schema-v3.sql"))?;
+        tx.pragma_update(None, "user_version", 3)?;
+        tx.commit()?;
     }
     Ok(db)
 }

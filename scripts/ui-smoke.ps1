@@ -27,6 +27,7 @@ Set-Content -LiteralPath "$files\unique-smoke-report.md" -Value 'fixture'
 @"
 folders = ['$files']
 exclusions = ['*.tmp']
+semantic_enabled = false
 reconcile_seconds = 30
 "@ | Set-Content -LiteralPath "$data\config.toml"
 $env:GOOD_SEARCH_DATA=$data

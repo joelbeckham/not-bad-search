@@ -46,6 +46,14 @@ pub fn inspect(db: &mut Connection, path: &str) -> Result<Value> {
             document_id,
         )?
         .into();
+        for chunk in document["chunks"].as_array_mut().unwrap() {
+            chunk["embeddings"] = rows(
+                &tx,
+                "SELECT * FROM embeddings WHERE chunk_id=?1",
+                chunk["id"].as_i64().context("Invalid chunk ID")?,
+            )?
+            .into();
+        }
     }
     let jobs = rows(&tx, "SELECT * FROM image_jobs WHERE file_id=?1", id)?;
     let cache=rows(&tx,"SELECT c.* FROM image_cache c JOIN image_jobs j ON j.source_hash=c.source_hash AND j.model=c.model AND j.version=c.version WHERE j.file_id=?1",id)?;

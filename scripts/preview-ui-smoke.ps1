@@ -38,7 +38,7 @@ $font.Dispose();$graphics.Dispose();$bitmap.Dispose()
 $text=(1..100 | ForEach-Object {if($_ -eq 40){'previewfixture: highlighted matching line'}else{"Line $_ of this local text preview"}}) -join "`n"
 [IO.File]::WriteAllText((Join-Path $files 'previewfixture-b.txt'),$text)
 [IO.File]::WriteAllText((Join-Path $files 'previewfixture-c.txt'),'previewfixture: another file')
-@("folders = ['$files']",'image_daily_requests = 0','reconcile_seconds = 300') | Set-Content "$data\config.toml"
+@("folders = ['$files']",'image_daily_requests = 0','semantic_enabled = false','reconcile_seconds = 300') | Set-Content "$data\config.toml"
 $old=$env:GOOD_SEARCH_DATA;$oldTrace=$env:GOOD_SEARCH_TRACE;$oldWorker=$env:GOOD_SEARCH_WORKER_TRACE
 $env:GOOD_SEARCH_DATA=$data;$env:GOOD_SEARCH_TRACE='1';$env:GOOD_SEARCH_WORKER_TRACE='1'
 $proc=Start-Process -FilePath $Exe -PassThru

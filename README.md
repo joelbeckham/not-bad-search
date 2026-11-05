@@ -74,7 +74,7 @@ egui provides compact Rust UI code and direct rendering, but uses custom widgets
 1. Text search is implemented with versioned documents, chunks and FTS5. Current limits: raw Markdown, token phrases within chunks, and no PDF/Office extraction. Files are rehashed during reconciliation; unchanged chunks retain their IDs.
 2. Image text and descriptions: implemented through one OpenAI request per uncached image revision; local OCR is intentionally omitted.
 3. Image processing uses a persistent queue and hash/model/version cache, a daily request cap, pause/retry controls, and Windows Credential Manager.
-4. Semantic image retrieval: descriptions alone give lexical search. Add local embeddings of descriptions and a local query embedding model/vector index for genuinely semantic retrieval without network requests at search time.
+4. Semantic retrieval uses local Potion 8M embeddings of text, extracted image text and image descriptions, with a debounced hybrid ranking pass.
 
 Embeddings are not implemented. Only the opted-in image worker makes OpenAI calls; search never does.
 
@@ -103,7 +103,7 @@ The daily cap counts attempted requests (including retries), resets at midnight 
 
 Pause takes effect after saving; an already-sent request may finish and be cached. Removing a folder opt-in removes its indexed image documents and unreferenced cache entries on the next scan. Deletion, exclusions, changed source bytes and changed model/prompt version invalidate image outputs. Duplicate images share cached extraction when hash/model/version match. Scans rehash eligible files, but unchanged images do not trigger new API calls.
 
-The API key is stored as the current Windows user's generic credential `GoodSearch/OpenAI`, shared by isolated Good Search profiles. It is never written to TOML or SQLite. **Remove key** removes that credential. The app requests `store:false` from the Responses API; this is not a claim of zero provider retention. Folder opt-in authorizes uploading image bytes, including embedded metadata. No local OCR or embeddings are used.
+The API key is stored as the current Windows user's generic credential `GoodSearch/OpenAI`, shared by isolated Good Search profiles. It is never written to TOML or SQLite. **Remove key** removes that credential. The app requests `store:false` from the Responses API; this is not a claim of zero provider retention. Folder opt-in authorizes uploading image bytes, including embedded metadata. OCR uses OpenAI; embeddings and searches run locally.
 
 For a synthetic live API check only (one request maximum): create an image containing the word `marmalade`, then run `diagnostics image-test NEW_DB FIXTURE_FOLDER`. `diagnostics store-key-file PRIVATE_FILE` can import a key without placing its value in command arguments; the app's masked Settings field is the normal setup flow.
 
@@ -112,3 +112,13 @@ Right-click a search result for **Inspect indexed data**, **Copy path**, or **Op
 ## File previews
 
 Previews read the current file locally in one background worker; no OpenAI calls are made. PNG, JPEG and WebP images fit the window (up to 32 MiB / 40 megapixels, downscaled to 1600 pixels for display). UTF-8 text and raw Markdown show line numbers and highlighted search terms, initially scrolled near the first match. Text previews are limited to 2 MiB, 20,000 lines and 8 KiB per line; partial previews are labeled. Unsupported, missing or unreadable files show an explanation and can still be opened in their default application. Up/Down browse a snapshot of the results so background indexing cannot shift the preview order. Ctrl+, opens Settings and Back/Escape returns to the preview.
+
+## Semantic search
+
+Enabled by default. Filename and FTS results appear immediately; after a 200 ms typing pause, a second local pass retrieves related chunks and blends rankings using reciprocal-rank fusion. Settings lets you disable semantic search or change the delay (50–2000 ms). Queries shorter than three characters remain lexical. Quoted queries keep their strict lexical candidate set. Exact filename matches remain first; semantic-only results are labeled in their snippets. The selected file is preserved when rankings update, and preview navigation uses its existing result snapshot.
+
+The MIT-licensed [Potion 8M model](https://huggingface.co/minishlab/potion-base-8M) runs via [Model2Vec Rust](https://github.com/MinishLab/model2vec-rs). A one-time download of about 30 MiB is stored under the Windows app data `models` directory, pinned to revision `bf8b056651a2c21b8d2565580b8569da283cab23`. No file content or search text is sent for embeddings. No API key, GPU, Python, webview or external service is needed for semantic search. The compact English model prioritizes speed; it is not a full language model and is weaker at nuanced meaning and non-English text.
+
+A low-priority worker embeds ready chunks in batches, outside write transactions, and stores 256-dimensional normalized vectors in SQLite. Files without extracted content still have filename search. Changed/deleted chunks invalidate vectors automatically. Queries use a warm in-memory vector snapshot, exact cosine similarity (minimum 0.35), the best chunk per file, and a bounded cache of 64 query vectors. Snapshot refresh follows SQLite changes, and final result hydration checks current chunk hashes. Stale query generations are ignored. If model setup or semantic search fails, lexical search remains available; Settings shows the error. Disabling semantic search stops embedding work and releases the model/cache but retains vectors on disk for reuse.
+
+Run `embedding-bench MODEL_FOLDER NEW_DATABASE` for deterministic relevance checks and a 10,000-chunk Windows benchmark. `scripts/semantic-ui-smoke.ps1` checks native debounce, repeated/replaced queries, quotes, preview navigation, clearing, memory and hidden idle CPU with synthetic local fixtures.

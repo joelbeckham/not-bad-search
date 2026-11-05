@@ -76,7 +76,7 @@ Broader tests remain for large real-world folder trees, inaccessible subdirector
 
 ### Completed native hotkey validation (2026-11-04)
 
-On the idle Windows desktop, `scripts/ui-smoke.ps1` passed 10 hotkey show/focus cycles, Escape hiding, filename search, native rename refresh, and close-to-hide. Hotkey latency was 15.87�43.79 ms. Typing the full synthetic filename query through SendKeys to its rendered result took 407.05 ms (includes typing); rename-to-result took 264.07 ms. Working set: 92.18 MiB; private memory: 56.67 MiB. Visible idle CPU: 0.625% of one core over 10 seconds; hidden idle CPU: 0.848% over 35 seconds, spanning periodic reconciliation. Fixture: `test-data/ui-86cf085d04ba4b38a7902ec8d1fd01ad`.
+On the idle Windows desktop, `scripts/ui-smoke.ps1` passed 10 hotkey show/focus cycles, Escape hiding, filename search, native rename refresh, and close-to-hide. Hotkey latency was 15.87�43.79 ms. Typing the full synthetic filename query through SendKeys to its rendered result took 407.05 ms (includes typing); rename-to-result took 264.07 ms. Working set: 92.18 MiB; private memory: 56.67 MiB. Visible idle CPU: 0.625% of one core over 10 seconds; hidden idle CPU: 0.848% over 35 seconds, spanning periodic reconciliation. Fixture: `test-data/ui-86cf085d04ba4b38a7902ec8d1fd01ad`.
 
 The user confirmed mouse activity during an interrupted content run; those incomplete runs do not establish an application stall.
 
@@ -116,3 +116,12 @@ Ctrl+comma shortcut: Windows release and strict Clippy passed. Native check veri
 ## Window centering
 
 Windows release build and strict Clippy passed. Native positioning test verified startup, the WM_HOTKEY handler while visible and hidden, and reopening the existing instance, each within 0.5 physical pixels of a monitor work-area center. Tests deliberately displaced the window before reactivation. Injected Ctrl+Alt+Space did not reach the test app, so the handler was checked with posted WM_HOTKEY messages; this run does not establish physical-key delivery. Monitor checks tolerate pointer movement during testing. Centering uses per-monitor DPI-aware physical coordinates and the pointer monitor's work area. Header dragging was removed.
+
+## Local semantic search (2026-11-05)
+
+- 21 automated Windows tests passed. New tests cover v2-to-v3 migration, embedding persistence, deduplication, change/delete invalidation, stale publication rejection, invalid vectors, exact-filename protection, strict quotes and hybrid ordering. After the final scoring changes, content/inspection/semantic tests passed again. Strict Clippy passed over all final targets.
+- Potion 8M (pinned revision bf8b056651a2c21b8d2565580b8569da283cab23) passed four deterministic synonym fixtures. Local query embeddings: p95 0.002 ms; model load 44–88 ms across runs. Final 10,000-chunk benchmark: indexing 1479 ms, initial vector snapshot load 65 ms, query embedding plus semantic retrieval p50 2.654 ms / p95 3.261 ms / p99 3.813 ms. The index uses 256-dimensional vectors and exact scanning; these fixture measurements do not establish large-corpus or multilingual relevance.
+- Native semantic UI smoke passed with no embedding network requests: immediate lexical results, semantic-only retrieval, repeated query, replacing a query before debounce, strict quotes, preview, clearing pending work, Settings and hiding. Screenshots inspected. Results arrived 198–205 ms after synthetic typing finished with a 200 ms debounce. The total first-keystroke-to-result time was 702–711 ms because SendKeys deliberately types characters over time. Hidden idle CPU 0.31% of one core over 10 seconds; working set 134.93 MiB. Test app hotkey registration conflicted with the normal instance, so global hotkey behavior was not retested here.
+- Installed the verified build and pinned model locally. Pre-migration database/config/WAL backup: test-data/before-semantic-5c97adcb05f84d29b7caf868fe8e3a03. Existing filename, text and image extraction sources are retained; no re-upload to OpenAI is required for embedding them.
+
+Post-install verification: the normal index contains 1440 / 1440 embedded ready chunks. Running app working set sampled at 125.29 MiB.

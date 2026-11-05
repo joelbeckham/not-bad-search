@@ -41,6 +41,7 @@ $contentRoots=if($Content){"['$files']"}else{'[]'}
 folders = ['$files']
 exclusions = []
 content_folders = $contentRoots
+semantic_enabled = false
 reconcile_seconds = 30
 "@ | Set-Content "$data\config.toml"
 $oldData=$env:GOOD_SEARCH_DATA;$oldTrace=$env:GOOD_SEARCH_TRACE
