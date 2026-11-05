@@ -119,8 +119,10 @@ impl App {
                     } else if self.settings || self.inspector.is_some() || self.preview.is_some() {
                         "‹  Back to search"
                     } else {
-                        "Settings (Ctrl+,)"
+                        "Settings"
                     };
+                    let show_settings_key =
+                        !self.settings && self.inspector.is_none() && self.preview.is_none();
                     if ui
                         .add(
                             egui::Button::new(RichText::new(label).size(13.).color(MUTED))
@@ -134,6 +136,9 @@ impl App {
                             self.settings = true;
                         }
                         self.focus = !self.settings;
+                    }
+                    if show_settings_key {
+                        key(ui, "Ctrl + ,");
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if self.inspector.is_some() && !self.settings {
