@@ -46,7 +46,8 @@ impl App {
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(16, 10))
             .show(ui, |ui| {
-                ui.label(&inspector.path);
+                let location=inspector.data.as_ref().and_then(|d|d.as_ref().ok()).and_then(|d|d["remote_item"][0]["original_url"].as_str()).unwrap_or(&inspector.path);
+                ui.add(egui::Label::new(location).truncate()).on_hover_text(location);
                 ui.label("Local index snapshot. Refresh to see new indexing results.");
                 ui.horizontal(|ui| {
                     refresh = ui.button("Refresh").clicked();
@@ -70,6 +71,9 @@ impl App {
                         Some(Ok(data)) => {
                             section(ui, "File metadata", &data["file"], true);
                             for (key, title) in [
+                                ("remote_item", "Remote item metadata and raw content"),
+                                ("sync", "Source synchronization"),
+                                ("remote_failures", "Unresolved synchronization failures"),
                                 ("documents", "Extracted documents"),
                                 ("image_jobs", "Image processing jobs"),
                                 ("image_cache", "Cached image extraction"),
@@ -127,7 +131,15 @@ fn section(ui: &mut egui::Ui, title: &str, value: &Value, expanded: bool) {
                                 });
                             }
                         } else if let Some(text) = value.as_str().filter(|_| {
-                            matches!(name.as_str(), "body" | "extracted_text" | "description")
+                            matches!(
+                                name.as_str(),
+                                "body"
+                                    | "extracted_text"
+                                    | "description"
+                                    | "raw_adf"
+                                    | "searchable_text"
+                                    | "warnings"
+                            )
                         }) {
                             ui.horizontal(|ui| {
                                 ui.strong(name);

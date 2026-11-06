@@ -15,6 +15,11 @@ enum Tab {
 }
 #[derive(Default)]
 pub(super) struct State {
+    pub remote_status: String,
+    endpoint: String,
+    api_key: String,
+    connection_status: String,
+    connection_rx: Option<mpsc::Receiver<String>>,
     tab: Tab,
     pub selected: Option<String>,
     stats: Vec<Status>,
@@ -23,6 +28,140 @@ pub(super) struct State {
     error: String,
 }
 impl App {
+    fn draw_jira_source(&mut self, ui: &mut egui::Ui, index: usize) {
+        let source = &mut self.config.sources[index];
+        ui.heading(&source.name);
+        ui.label("Jira through Bifrost · ordinary account · read-only");
+        ui.label("Name");
+        ui.text_edit_singleline(&mut source.name);
+        let settings = source.jira.get_or_insert_with(Default::default);
+        ui.label("Jira site");
+        ui.add(egui::TextEdit::singleline(&mut settings.site).desired_width(f32::INFINITY));
+        ui.label("Cloud ID");
+        ui.text_edit_singleline(&mut settings.cloud_id);
+        ui.label("Project key");
+        ui.text_edit_singleline(&mut settings.project);
+        ui.label("JQL scope");
+        ui.add(
+            egui::TextEdit::multiline(&mut settings.jql)
+                .desired_rows(3)
+                .desired_width(f32::INFINITY),
+        );
+        ui.weak("Start with a few keys, e.g. key in (CORE-123, CORE-456). The project constraint is always applied; sync orders by updated time.");
+        ui.horizontal(|ui| {
+            ui.label("Poll every");
+            ui.add(
+                egui::DragValue::new(&mut settings.poll_seconds)
+                    .range(30..=86400)
+                    .suffix(" seconds"),
+            );
+            ui.label("Issues per page");
+            ui.add(egui::DragValue::new(&mut settings.page_size).range(1..=100));
+        });
+        ui.checkbox(
+            &mut source.paused,
+            "Pause syncing (save to apply or cancel an active run)",
+        );
+        ui.label("Indexes summaries and descriptions only. Comments and attachment contents are excluded. Search and previews use the local index, never Jira.");
+        ui.weak("Missing issues are retained: deletion/access-change feeds are unverified. Inspect an issue's local sync time and source freshness before relying on cached content.");
+        if let Some(stats) = self
+            .source_settings
+            .stats
+            .iter()
+            .find(|s| s.id == source.id)
+        {
+            draw_status(ui, stats, source.paused, true);
+        }
+        ui.label(&self.source_settings.remote_status);
+        ui.horizontal(|ui| {
+            if ui.button("Sync enabled Jira sources now").clicked() {
+                let _ = self.remote_wake.try_send(());
+                self.source_settings.checked = None;
+            }
+            if ui.button("Remove source").clicked() {
+                self.config.sources.remove(index);
+                self.source_settings.selected = None;
+            }
+        });
+        ui.weak("Connection credentials are shared in Processing → Bifrost. Manual sync uses saved settings.");
+    }
+    fn draw_bifrost_settings(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Bifrost MCP connection");
+        ui.weak("Shared connection for remote sources. Endpoint and API key are stored together in Windows Credential Manager, never config.toml.");
+        ui.label("MCP endpoint");
+        ui.add(
+            egui::TextEdit::singleline(&mut self.source_settings.endpoint)
+                .password(true)
+                .desired_width(f32::INFINITY),
+        );
+        ui.label("API key");
+        ui.add(
+            egui::TextEdit::singleline(&mut self.source_settings.api_key)
+                .password(true)
+                .desired_width(f32::INFINITY),
+        );
+        ui.horizontal(|ui| {
+            if ui.button("Store connection").clicked() {
+                let connection = good_search::bifrost::Connection {
+                    endpoint: self.source_settings.endpoint.trim().into(),
+                    api_key: self.source_settings.api_key.trim().into(),
+                };
+                match connection.save() {
+                    Ok(()) => {
+                        self.source_settings.endpoint.clear();
+                        self.source_settings.api_key.clear();
+                        self.source_settings.connection_status = "Connection saved".into();
+                    }
+                    Err(e) => self.source_settings.connection_status = e.to_string(),
+                }
+            }
+            if ui
+                .add_enabled(
+                    self.source_settings.connection_rx.is_none(),
+                    egui::Button::new("Test saved connection"),
+                )
+                .clicked()
+            {
+                let (tx, rx) = mpsc::channel();
+                self.source_settings.connection_rx = Some(rx);
+                self.source_settings.connection_status = "Checking ordinary Jira account…".into();
+                let ctx = ui.ctx().clone();
+                std::thread::spawn(move || {
+                    let result = (|| -> anyhow::Result<String> {
+                        let mut m = good_search::bifrost::Mcp::connect(
+                            good_search::bifrost::Connection::load()?,
+                        )?;
+                        let user = m.call("jira_atlassianUserInfo", serde_json::json!({}))?;
+                        Ok(format!(
+                            "Connected · {}",
+                            user["displayName"]
+                                .as_str()
+                                .or(user["name"].as_str())
+                                .unwrap_or("ordinary Jira account")
+                        ))
+                    })();
+                    let _ = tx.send(result.unwrap_or_else(|e| format!("Connection failed: {e:#}")));
+                    ctx.request_repaint();
+                });
+            }
+            if ui.button("Remove connection").clicked() {
+                match good_search::credentials::remove_named("Bifrost/default") {
+                    Ok(()) => self.source_settings.connection_status = "Connection removed".into(),
+                    Err(e) => self.source_settings.connection_status = e.to_string(),
+                }
+            }
+        });
+        if let Some(rx) = &self.source_settings.connection_rx {
+            if let Ok(message) = rx.try_recv() {
+                self.source_settings.connection_status = message;
+                self.source_settings.connection_rx = None;
+            } else {
+                ui.ctx().request_repaint_after(Duration::from_millis(100));
+            }
+        }
+        ui.label(&self.source_settings.connection_status);
+        ui.separator();
+    }
     fn source_status_update(&mut self, ui: &egui::Ui) {
         let state = &mut self.source_settings;
         if let Some(rx) = &state.receiver {
@@ -132,6 +271,10 @@ impl App {
                 self.source_settings.selected = None;
                 return;
             };
+            if !self.config.sources[index].is_folder() {
+                self.draw_jira_source(ui, index);
+                return;
+            }
             let source = &mut self.config.sources[index];
             ui.heading(&source.name);
             ui.weak("Folder source · Windows and WSL paths supported");
@@ -211,6 +354,11 @@ impl App {
         }
         ui.horizontal(|ui| {
             ui.heading("Data sources");
+            if ui.button("+ Add Jira").clicked() {
+                let source = Source::jira_source();
+                self.source_settings.selected = Some(source.id.clone());
+                self.config.sources.push(source);
+            }
             if ui.button("+ Add folder").clicked() {
                 let mut source = Source::folder(std::path::PathBuf::new());
                 source.id = blake3::hash(format!("{:?}", std::time::SystemTime::now()).as_bytes())
@@ -227,7 +375,9 @@ impl App {
                 self.config.sources.push(source);
             }
         });
-        ui.weak("Each folder has its own indexing options and exclusions. Counts are files, not chunks.");
+        ui.weak(
+            "Each source has its own scope and indexing options. Counts are items, not chunks.",
+        );
         if !self.source_settings.error.is_empty() {
             ui.colored_label(Color32::LIGHT_RED, &self.source_settings.error);
         }
@@ -242,9 +392,17 @@ impl App {
                         if ui.button(RichText::new(&source.name).size(17.)).clicked() {
                             self.source_settings.selected = Some(source.id.clone());
                         }
-                        ui.weak("Folder");
+                        ui.weak(if source.is_folder() { "Folder" } else { "Jira" });
                     });
-                    ui.label(source.path.to_string_lossy());
+                    ui.label(if source.is_folder() {
+                        source.path.to_string_lossy().into_owned()
+                    } else {
+                        source
+                            .jira
+                            .as_ref()
+                            .map(|j| format!("{} · {}", j.site, j.project))
+                            .unwrap_or_default()
+                    });
                     if let Some(stats) = self
                         .source_settings
                         .stats
@@ -283,6 +441,7 @@ impl App {
         ui.add_space(12.);
     }
     fn draw_processing_settings(&mut self, ui: &mut egui::Ui) {
+        self.draw_bifrost_settings(ui);
         ui.heading("Background processing");
         ui.horizontal(|ui| {
             ui.label("Maximum text file size");
@@ -369,6 +528,19 @@ impl App {
     }
 }
 fn draw_status(ui: &mut egui::Ui, s: &Status, paused: bool, detail: bool) {
+    if let Some(status) = &s.remote_status {
+        ui.label(format!(
+            "{}{} issues indexed locally",
+            if paused { "Paused · " } else { "" },
+            s.items
+        ));
+        ui.label(status);
+        ui.weak(format!(
+            "{} issues ready for semantic search · {} queued",
+            s.embedding_ready, s.embedding_queued
+        ));
+        return;
+    }
     let state = if paused {
         "Paused"
     } else if !s.available {

@@ -4,6 +4,8 @@ A Windows 11 filename and text search launcher in Rust, SQLite, and egui/eframe.
 
 ## Run
 
+Jira summaries and descriptions can also be imported through Bifrost with a scoped JQL source. See [Jira setup, synchronization and limitations](docs/jira-source.md). Remote searches and previews use the local index.
+
 Launch `target\release\good-search.exe`. On first launch, enter the folders to index in Settings and choose **Save changes**. Nothing is indexed until you select folders.
 
 - **Ctrl+Alt+Space** shows and focuses the search window globally.

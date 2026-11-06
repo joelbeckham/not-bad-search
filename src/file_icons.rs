@@ -43,6 +43,10 @@ pub fn icon(name: &str) -> (&'static str, &'static [u8]) {
     assets::asset(icon_id(name)).unwrap_or_else(|| assets::asset("_file").unwrap())
 }
 
+pub fn jira_icon() -> (&'static str, &'static [u8]) {
+    ("bytes://sources/jira.svg", include_bytes!("../assets/sources/jira.svg"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -59,6 +63,8 @@ mod tests {
     }
     #[test]
     fn all_mapped_icons_render() {
+        egui_extras::image::load_svg_bytes(jira_icon().1, &Default::default())
+            .expect("Invalid bundled Jira icon");
         let map = mapping();
         let ids: std::collections::HashSet<_> = map
             .file_names

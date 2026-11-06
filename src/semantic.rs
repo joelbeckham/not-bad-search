@@ -102,7 +102,12 @@ fn decode(bytes: &[u8]) -> Result<Vec<f32>> {
 pub fn index_batch(db: &mut Connection, model: &impl Embedder, limit: usize) -> Result<usize> {
     index_batch_excluding(db, model, limit, "[]")
 }
-pub fn index_batch_excluding(db: &mut Connection, model: &impl Embedder, limit: usize, paused: &str) -> Result<usize> {
+pub fn index_batch_excluding(
+    db: &mut Connection,
+    model: &impl Embedder,
+    limit: usize,
+    paused: &str,
+) -> Result<usize> {
     let rows: Vec<(i64,String,String,String)> = db.prepare("SELECT c.id,c.content_hash,c.heading,c.body FROM chunks c JOIN documents d ON d.id=c.document_id LEFT JOIN embeddings e ON e.chunk_id=c.id AND e.model=?1 AND e.content_hash=c.content_hash WHERE d.status='ready' AND e.chunk_id IS NULL AND d.file_id IN (SELECT id FROM files WHERE root NOT IN (SELECT value FROM json_each(?3))) ORDER BY c.id LIMIT ?2")?
         .query_map(params![MODEL, limit.min(64) as i64, paused], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
     if rows.is_empty() {
@@ -199,6 +204,7 @@ impl VectorIndex {
                         _ => "text",
                     };
                     hits.push(Hit {
+                        original_url: None,
                         path,
                         name,
                         snippet: Some(format!(
@@ -215,6 +221,7 @@ impl VectorIndex {
                 }
             }
         }
+        crate::remote_locations(db, &mut hits)?;
         Ok(hits)
     }
 }

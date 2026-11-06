@@ -43,7 +43,7 @@ pub fn load(path: &Path, query: &str) -> Result<Content> {
     let limit = if is_image { IMAGE_LIMIT } else { TEXT_LIMIT };
     let mut bytes = Vec::new();
     file.take((limit + 1) as u64).read_to_end(&mut bytes)?;
-    let mut truncated = bytes.len() > limit;
+    let truncated = bytes.len() > limit;
     if is_image {
         if truncated {
             bail!("Image exceeds the 32 MiB preview limit. Open it in its default app.");
@@ -82,6 +82,9 @@ pub fn load(path: &Path, query: &str) -> Result<Content> {
     {
         bail!("No text preview for this binary file. Press Enter to open it in its default app.");
     }
+    Ok(text_preview(text, query, truncated))
+}
+pub fn text_preview(text: &str, query: &str, mut truncated: bool) -> Content {
     let terms = crate::query::terms(query);
     let lines: Vec<_> = text
         .trim_start_matches('\u{feff}')
@@ -105,11 +108,11 @@ pub fn load(path: &Path, query: &str) -> Result<Content> {
         .iter()
         .position(|line| !line.matches.is_empty())
         .unwrap_or(0);
-    Ok(Content::Text {
+    Content::Text {
         lines,
         truncated,
         first_match,
-    })
+    }
 }
 
 fn matches(text: &str, terms: &[String]) -> Vec<Range<usize>> {

@@ -57,7 +57,10 @@ pub fn inspect(db: &mut Connection, path: &str) -> Result<Value> {
     }
     let jobs = rows(&tx, "SELECT * FROM image_jobs WHERE file_id=?1", id)?;
     let cache=rows(&tx,"SELECT c.* FROM image_cache c JOIN image_jobs j ON j.source_hash=c.source_hash AND j.model=c.model AND j.version=c.version WHERE j.file_id=?1",id)?;
-    let value = serde_json::json!({"file":file,"documents":documents,"image_jobs":jobs,"image_cache":cache});
+    let remote = rows(&tx, "SELECT * FROM remote_items WHERE file_id=?1", id)?;
+    let sync = rows(&tx,"SELECT s.* FROM remote_sync s JOIN remote_items r ON r.source_id=s.source_id WHERE r.file_id=?1",id)?;
+    let failures = rows(&tx,"SELECT e.* FROM remote_failures e JOIN remote_items r ON r.source_id=e.source_id AND r.site=e.site AND r.remote_id=e.remote_id WHERE r.file_id=?1",id)?;
+    let value = serde_json::json!({"file":file,"remote_item":remote,"sync":sync,"remote_failures":failures,"documents":documents,"image_jobs":jobs,"image_cache":cache});
     tx.commit()?;
     Ok(value)
 }

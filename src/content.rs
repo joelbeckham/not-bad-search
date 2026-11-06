@@ -83,7 +83,9 @@ fn read_text(path: &Path, cap: u64) -> Result<(String, String)> {
 
 pub(crate) fn index(db: &mut Connection, config: &Config) -> Result<Vec<String>> {
     let files: Vec<(i64, String, String)> = db
-        .prepare("SELECT id,path,root FROM files")?
+        .prepare(
+            "SELECT id,path,root FROM files WHERE id NOT IN (SELECT file_id FROM remote_items)",
+        )?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
     let mut failures = 0;
@@ -93,7 +95,9 @@ pub(crate) fn index(db: &mut Connection, config: &Config) -> Result<Vec<String>>
         .filter(|p| p.is_dir())
         .collect();
     for (file_id, path, root) in files {
-        if config.source_paused(Path::new(&root)) { continue; }
+        if config.source_paused(Path::new(&root)) {
+            continue;
+        }
         let supported = Path::new(&path)
             .extension()
             .and_then(|s| s.to_str())
@@ -185,6 +189,7 @@ pub(crate) fn search_content(
                 _ => format!("Text · line {line}"),
             };
             hits.push(Hit {
+                original_url: None,
                 path,
                 name: row.get(1)?,
                 snippet: Some(format!(

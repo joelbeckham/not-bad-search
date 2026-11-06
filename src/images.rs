@@ -132,11 +132,15 @@ pub fn discover(db: &mut Connection, config: &Config) -> Result<()> {
         return Ok(());
     }
     let files: Vec<(i64, String, String)> = db
-        .prepare("SELECT id,path,root FROM files")?
+        .prepare(
+            "SELECT id,path,root FROM files WHERE id NOT IN (SELECT file_id FROM remote_items)",
+        )?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
     for (id, path, root) in files {
-        if config.source_paused(Path::new(&root)) { continue; }
+        if config.source_paused(Path::new(&root)) {
+            continue;
+        }
         let eligible = config.image_folders.iter().any(|p| p == Path::new(&root))
             && Path::new(&path)
                 .extension()
@@ -242,7 +246,8 @@ pub fn process_one(
         cached
     } else {
         let latest = current();
-        if latest.images_paused || latest.source_paused(Path::new(&root))
+        if latest.images_paused
+            || latest.source_paused(Path::new(&root))
             || latest.image_model != model
             || !latest.image_folders.iter().any(|p| p == Path::new(&root))
         {

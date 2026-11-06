@@ -6,9 +6,23 @@ Executable definitions: [schema.sql](../src/schema.sql). Migrations and connecti
 
 The Windows-local database is `%LOCALAPPDATA%\GoodSearch\index.sqlite`. `GOOD_SEARCH_DATA` overrides the directory. WSL UNC paths are sources only. Configuration lives in `config.toml` beside the index.
 
-`PRAGMA user_version = 3` identifies this schema. Startup adopts the original unversioned filename index (version 0) and creates content tables in one transaction, preserving filename rows. Workers start after migration. Newer versions are rejected. Future changes require numbered migrations.
+`PRAGMA user_version = 4` identifies this schema. Startup adopts the original unversioned filename index (version 0) and applies numbered transactional migrations, preserving existing rows. Workers start after migration. Newer versions are rejected.
 
 ## Tables and columns
+
+### Version 4: remote sources
+
+Executable migration: [schema-v4.sql](../src/schema-v4.sql). Connector behavior: [Jira source](jira-source.md).
+
+| Table | Columns and meaning |
+| --- | --- |
+| `remote_items` | `file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE`; `source_id`, `connection_id`, `site`, `remote_id`: source/account/site/stable issue identity; `issue_key`, `title`, `original_url`: display and opening; `remote_updated`, `synced_at`: normalized UTC timestamps; `content_hash`: BLAKE3 of extraction version, key, title and raw ADF; `raw_adf`: original JSON; `searchable_text`: converted title/description; `warnings`: JSON array; `last_seen_run`, `scope_hash`: provenance. All non-key fields are non-null TEXT. Unique `(source_id,site,remote_id)`; index on `source_id`. |
+| `remote_sync` | `source_id TEXT PRIMARY KEY`, `scope_hash TEXT NOT NULL`; nullable TEXT `checkpoint`, `run_id`, `run_jql`, `next_token`, `candidate`, `last_success`, `last_attempt`; `error TEXT NOT NULL DEFAULT ''`; INTEGER NOT NULL DEFAULT 0 `failures`, `retry_at` (Unix seconds), `pages`, `items`. Candidate/checkpoint are normalized remote UTC timestamps. Page counters belong to the current/latest run, not a server-reported total. |
+| `remote_failures` | Non-null TEXT `source_id`, `site`, `remote_id`, `issue_key`, `error`, `attempted_at`; composite primary key `(source_id,site,remote_id)`. Tracks detail/conversion failures, including issues that have never been published locally. Cleared on successful publication or explicit source removal. |
+
+Remote backing `files` rows use `root = jira:<source ID>` and a stable `good-search://jira/<source ID>/<site hash>/<remote ID>` internal URI. They are never opened as filesystem paths. Their documents use `kind=text`; the source hash describes Jira content rather than local file bytes. Local scanners explicitly exclude remote rows. `remote_sync` and failures are source-owned rather than foreign-keyed to a configuration table; explicit source removal cleans them up. Narrowing a query, missing results or an access error never automatically deletes an item.
+
+### Core tables
 
 All columns are NOT NULL, except primary keys which carry identity constraints.
 

@@ -200,7 +200,14 @@ impl Drop for Hotkey {
     }
 }
 
-pub fn open_file(path: &str) -> Result<()> {
+pub fn open_file(path: &str, database: &std::path::Path) -> Result<()> {
+    let target;
+    let path = if path.starts_with("good-search://jira/") {
+        target = good_search::jira::open_target(&good_search::open_reader(database)?, path)?;
+        target.as_str()
+    } else {
+        path
+    };
     let wide: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
     let result = unsafe {
         windows_sys::Win32::UI::Shell::ShellExecuteW(

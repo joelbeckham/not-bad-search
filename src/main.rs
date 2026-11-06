@@ -1,10 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod appearance;
-mod settings_ui;
 mod inspector_ui;
+mod jira_worker;
 mod platform;
 mod preview_ui;
 mod semantic_worker;
+mod settings_ui;
 use anyhow::{Context, Result};
 use eframe::egui;
 use good_search::{
@@ -27,6 +28,7 @@ enum Event {
     Error(String),
     IndexError(String),
     ImageStatus(String, bool),
+    RemoteStatus(String, bool),
 }
 fn trace(path: &std::path::Path, message: &str) {
     if std::env::var_os("GOOD_SEARCH_WORKER_TRACE").is_some() {
@@ -42,6 +44,7 @@ fn trace(path: &std::path::Path, message: &str) {
 }
 struct App {
     source_settings: settings_ui::State,
+    remote_wake: mpsc::SyncSender<()>,
     filters: SearchFilters,
     background_refresh: bool,
     semantic: semantic_worker::Worker,
@@ -179,7 +182,9 @@ fn run() -> Result<()> {
         Config::default()
     };
     config.migrate_sources();
-    if !config.sources.is_empty() { config.sync_sources(); }
+    if !config.sources.is_empty() {
+        config.sync_sources();
+    }
     config.validate()?;
     let db_path = data.join("index.sqlite");
     open_db(&db_path)?;
@@ -215,6 +220,7 @@ fn run() -> Result<()> {
         let shared_config=Arc::new(Mutex::new(config.clone()));
         let semantic=semantic_worker::Worker::start(db_path.clone(),shared_config.clone(),tx.clone(),cc.egui_ctx.clone());
         let image_wake=start_image_worker(db_path.clone(),shared_config.clone(),tx.clone(),cc.egui_ctx.clone());
+        let remote_wake=jira_worker::start(db_path.clone(),shared_config.clone(),tx.clone(),cc.egui_ctx.clone());
         let image_notify=image_wake.clone();
         let (index_wake,index_rx)=mpsc::sync_channel(1);
         let cfg=shared_config.clone(); let context=cc.egui_ctx.clone(); let notify_tx=index_wake.clone();
@@ -261,14 +267,16 @@ fn run() -> Result<()> {
         instance.attach(window)?;
         platform::center_window(window);
         let (hotkey,error)=match platform::Hotkey::register(cc.egui_ctx.clone(),window) {Ok(h)=>(Some(h),String::new()),Err(e)=>(None,e.to_string())};
-        Ok(Box::new(App {source_settings:settings_ui::State::default(),background_refresh:false,index_error:String::new(),filters:SearchFilters::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.folders.is_empty(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
+        Ok(Box::new(App {remote_wake,source_settings:settings_ui::State::default(),background_refresh:false,index_error:String::new(),filters:SearchFilters::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.sources.is_empty(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
     })).map_err(|e|anyhow::anyhow!(e.to_string()))?;
     Ok(())
 }
 impl App {
     fn back(&mut self) {
         if self.settings {
-            if self.source_settings.selected.take().is_some() { return; }
+            if self.source_settings.selected.take().is_some() {
+                return;
+            }
             self.settings = false;
         } else if self.inspector.is_some() {
             self.inspector = None;
@@ -291,7 +299,9 @@ impl App {
     fn publish_hits(&mut self, hits: Vec<Hit>) {
         let selected = self.hits.get(self.selected).map(|h| h.path.clone());
         self.hits = hits;
-        self.selected = selected.and_then(|p| self.hits.iter().position(|h| h.path == p)).unwrap_or(0);
+        self.selected = selected
+            .and_then(|p| self.hits.iter().position(|h| h.path == p))
+            .unwrap_or(0);
         self.background_refresh = false;
         self.trace_results = true;
     }
@@ -356,6 +366,7 @@ impl App {
         let _ = self.index_wake.try_send(());
         let _ = self.image_wake.try_send(false);
         self.semantic.wake();
+        let _ = self.remote_wake.try_send(());
         self.submit();
         Ok(())
     }
@@ -383,7 +394,9 @@ impl eframe::App for App {
                     self.searching = false;
                     self.completed_generation = id;
                     self.elapsed = time;
-                    if !self.background_refresh || (!self.semantic_pending && self.semantic_due.is_none()) {
+                    if !self.background_refresh
+                        || (!self.semantic_pending && self.semantic_due.is_none())
+                    {
                         self.publish_hits(next_hits);
                     }
                 }
@@ -396,6 +409,13 @@ impl eframe::App for App {
                     }
                 }
                 Event::Error(e) => self.error = e,
+                Event::RemoteStatus(message, changed) => {
+                    self.source_settings.remote_status = message;
+                    if changed {
+                        self.semantic.wake();
+                        self.refresh();
+                    }
+                }
                 Event::IndexError(e) => self.index_error = e,
                 Event::ImageStatus(status, changed) => {
                     self.image_status = status;

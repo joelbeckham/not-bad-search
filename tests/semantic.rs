@@ -106,6 +106,7 @@ fn publish_rejects_changed_chunks_and_invalid_vectors() -> Result<()> {
 #[test]
 fn hybrid_ranking_protects_exact_names_quotes_and_deduplicates() {
     let hit = |name: &str| Hit {
+        original_url: None,
         path: format!("C:/{name}"),
         name: name.into(),
         snippet: None,
@@ -259,7 +260,7 @@ fn migration_v2_preserves_extracted_documents() -> Result<()> {
     let db = open_db(&path)?;
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
-        3
+        4
     );
     assert_eq!(
         db.query_row("SELECT count(*) FROM chunks", [], |r| r.get::<_, i64>(0))?,

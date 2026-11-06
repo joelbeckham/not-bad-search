@@ -4,11 +4,14 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+pub mod adf;
+pub mod bifrost;
 mod content;
 pub mod credentials;
 pub mod file_icons;
 pub mod images;
 pub mod inspection;
+pub mod jira;
 pub mod preview;
 mod query;
 pub mod semantic;
@@ -62,11 +65,24 @@ impl Config {
         let mut ids = std::collections::HashSet::new();
         let mut paths = std::collections::HashSet::new();
         for source in &self.sources {
-            if source.id.is_empty() || !ids.insert(&source.id) || !paths.insert(source.path.to_string_lossy().to_lowercase()) {
+            if source.id.is_empty()
+                || !ids.insert(&source.id)
+                || (source.is_folder()
+                    && !paths.insert(source.path.to_string_lossy().to_lowercase()))
+            {
                 bail!("Each source must have a unique ID and folder path");
             }
-            if source.name.trim().is_empty() { bail!("Give each source a name"); }
+            if source.name.trim().is_empty() {
+                bail!("Give each source a name");
+            }
             self.source_matcher(&source.path)?;
+            if !source.is_folder() {
+                source
+                    .jira
+                    .as_ref()
+                    .context("Jira source needs settings")?
+                    .validate()?;
+            }
         }
         if !(50..=2000).contains(&self.semantic_delay_ms) {
             bail!("Semantic search delay must be between 50 and 2000 ms");
@@ -117,9 +133,24 @@ impl Config {
 
 #[derive(Clone, Debug)]
 pub struct Hit {
+    pub original_url: Option<String>,
     pub path: String,
     pub name: String,
     pub snippet: Option<String>,
+}
+impl Hit {
+    pub fn location(&self) -> &str {
+        self.original_url.as_deref().unwrap_or(&self.path)
+    }
+}
+pub(crate) fn remote_locations(db: &Connection, hits: &mut [Hit]) -> Result<()> {
+    for hit in hits
+        .iter_mut()
+        .filter(|h| h.path.starts_with("good-search://jira/"))
+    {
+        hit.original_url=Some(db.query_row("SELECT original_url FROM remote_items r JOIN files f ON f.id=r.file_id WHERE f.path=?1",[&hit.path],|r|r.get(0))?);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -200,6 +231,7 @@ pub fn search_filtered(
     let mut stmt = db.prepare(&sql)?;
     let rows = stmt.query_map(rusqlite::params_from_iter(values), |r| {
         Ok(Hit {
+            original_url: None,
             path: r.get(0)?,
             name: r.get(1)?,
             snippet: None,
@@ -207,6 +239,7 @@ pub fn search_filtered(
     })?;
     let mut hits: Vec<Hit> = rows.collect::<rusqlite::Result<_>>()?;
     content::search_content(db, &terms, limit.min(200), &mut hits, options)?;
+    remote_locations(db, &mut hits)?;
     Ok(hits)
 }
 
@@ -237,13 +270,15 @@ pub fn reconcile(db: &mut Connection, config: &Config) -> Result<Vec<String>> {
         )?;
     }
     tx.execute(
-        "DELETE FROM files WHERE root NOT IN (SELECT path FROM roots)",
+        "DELETE FROM files WHERE root NOT IN (SELECT path FROM roots) AND id NOT IN (SELECT file_id FROM remote_items)",
         [],
     )?;
     tx.commit()?;
     for root in &config.folders {
         let result = (|| -> Result<()> {
-            if config.source_paused(root) { return Ok(()); }
+            if config.source_paused(root) {
+                return Ok(());
+            }
             let matcher = config.source_matcher(root)?;
             if !root.is_dir() {
                 bail!("Folder unavailable: {}", root.display());

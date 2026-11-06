@@ -15,7 +15,7 @@ pub(super) struct Loader {
     generation: u64,
 }
 impl Loader {
-    pub fn new(ctx: egui::Context) -> Self {
+    pub fn new(ctx: egui::Context, database: std::path::PathBuf) -> Self {
         let pending = Arc::new(Mutex::new(None::<Request>));
         let reply = Arc::new(Mutex::new(None));
         let (wake, rx) = mpsc::sync_channel(1);
@@ -26,7 +26,14 @@ impl Loader {
             while rx.recv().is_ok() {
                 let request = work.lock().unwrap().take();
                 if let Some((id, path, query)) = request {
-                    let result = good_search::preview::load(std::path::Path::new(&path), &query)
+                    let result = (|| -> anyhow::Result<Content> {
+                        if path.starts_with("good-search://jira/") {
+                            let db=good_search::open_reader(&database)?;
+                            let (text,warnings):(String,String)=db.query_row("SELECT searchable_text,warnings FROM remote_items r JOIN files f ON f.id=r.file_id WHERE f.path=?1",[&path],|r|Ok((r.get(0)?,r.get(1)?)))?;
+                            let text=if warnings!="[]"{format!("{text}\n\nIndexing notes: {warnings}")}else{text};
+                            Ok(good_search::preview::text_preview(&text,&query,false))
+                        }else {good_search::preview::load(std::path::Path::new(&path), &query)}
+                    })()
                         .map_err(|e| format!("{e:#}"));
                     *output.lock().unwrap() = Some((id, result));
                     ctx.request_repaint();
@@ -70,9 +77,9 @@ impl App {
         let Some(hit) = self.hits.get(self.selected) else {
             return;
         };
-        let loader = self
-            .preview_loader
-            .get_or_insert_with(|| Loader::new(ctx.clone()));
+        let loader = self.preview_loader.get_or_insert_with(|| {
+            Loader::new(ctx.clone(), self.config_path.with_file_name("index.sqlite"))
+        });
         let request = loader.request(hit.path.clone(), self.query.clone());
         self.preview = Some(Preview {
             items: self.hits.clone(),
@@ -128,7 +135,13 @@ impl App {
                 preview.selected + 1,
                 preview.items.len()
             ));
-            open |= ui.button("Open file").clicked();
+            open |= ui
+                .button(if preview.items[preview.selected].original_url.is_some() {
+                    "Open in Jira"
+                } else {
+                    "Open file"
+                })
+                .clicked();
         });
         let hit = &preview.items[preview.selected];
         if previous != preview.selected {
@@ -139,9 +152,12 @@ impl App {
             preview.open_error = None;
         }
         if open {
-            preview.open_error = crate::platform::open_file(&hit.path)
-                .err()
-                .map(|e| e.to_string());
+            preview.open_error = crate::platform::open_file(
+                &hit.path,
+                &self.config_path.with_file_name("index.sqlite"),
+            )
+            .err()
+            .map(|e| e.to_string());
             crate::trace(
                 &self.config_path.with_file_name("worker-trace.log"),
                 &format!(
@@ -152,9 +168,10 @@ impl App {
             );
         }
         ui.add(
-            egui::Label::new(RichText::new(&hit.path).size(12.).color(Color32::GRAY)).truncate(),
+            egui::Label::new(RichText::new(hit.location()).size(12.).color(Color32::GRAY))
+                .truncate(),
         )
-        .on_hover_text(&hit.path);
+        .on_hover_text(hit.location());
         if let Some(snippet) = &hit.snippet {
             ui.add(
                 egui::Label::new(RichText::new(snippet).color(Color32::from_rgb(120, 195, 204)))

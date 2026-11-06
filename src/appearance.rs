@@ -84,7 +84,8 @@ impl App {
                         return;
                     }
                     let search_id = ui.make_persistent_id("search_input");
-                    let search_screen = !self.settings && self.inspector.is_none() && self.preview.is_none();
+                    let search_screen =
+                        !self.settings && self.inspector.is_none() && self.preview.is_none();
                     // Claim focus before TextEdit processes this frame's keyboard events,
                     // including the first keystroke after clicking or scrolling elsewhere.
                     if search_screen {
@@ -187,7 +188,9 @@ impl App {
                         } else {
                             key(ui, "Enter");
                             ui.label(
-                                RichText::new(if self.preview.is_some() {
+                                RichText::new(if self.preview.as_ref().is_some_and(|p|p.items[p.selected].original_url.is_some()) {
+                                    "Open in Jira"
+                                } else if self.preview.is_some() {
                                     "Open file"
                                 } else {
                                     "Preview"
@@ -313,14 +316,18 @@ impl App {
                                 rect.min + Vec2::new(14., 18.),
                                 Vec2::splat(22.),
                             );
-                            let (uri, bytes) = good_search::file_icons::icon(&hit.name);
+                            let (uri, bytes) = if hit.path.starts_with("good-search://jira/") {
+                                good_search::file_icons::jira_icon()
+                            } else {
+                                good_search::file_icons::icon(&hit.name)
+                            };
                             egui::Image::from_bytes(uri, bytes).paint_at(ui, icon);
                             let ext = std::path::Path::new(&hit.name)
                                 .extension()
                                 .and_then(|s| s.to_str())
                                 .unwrap_or("file");
-                            let ext: String =
-                                ext.chars().take(8).collect::<String>().to_uppercase();
+                            let ext: String = if hit.original_url.is_some() { "JIRA".into() } else {
+                                ext.chars().take(8).collect::<String>().to_uppercase() };
                             let text_rect = egui::Rect::from_min_max(
                                 rect.min + Vec2::new(48., 8.),
                                 rect.max - Vec2::new(85., 5.),
@@ -338,7 +345,7 @@ impl App {
                                     .truncate().sense(Sense::hover()),
                             );
                             row_ui.add(
-                                egui::Label::new(RichText::new(&hit.path).size(11.).color(MUTED))
+                                egui::Label::new(RichText::new(hit.location()).size(11.).color(MUTED))
                                     .truncate().sense(Sense::hover()),
                             );
                             if let Some(snippet) = &hit.snippet {
@@ -355,8 +362,8 @@ impl App {
                             response.context_menu(|ui| {
                                 if ui.button("Preview").clicked() { self.selected=index; preview=true;ui.close(); }
                                 if ui.button("Inspect indexed data").clicked() {inspect=Some(hit.path.clone());ui.close();}
-                                if ui.button("Copy path").clicked() {ctx.copy_text(hit.path.clone());ui.close();}
-                                if ui.button("Open file").clicked() {open=Some(hit.path.clone());ui.close();}
+                                if ui.button(if hit.original_url.is_some() {"Copy link"} else {"Copy path"}).clicked() {ctx.copy_text(hit.location().to_owned());ui.close();}
+                                if ui.button(if hit.original_url.is_some() {"Open in Jira"} else {"Open file"}).clicked() {open=Some(hit.path.clone());ui.close();}
                             });
                             if response.clicked() {
                                 self.selected = index;
@@ -365,7 +372,7 @@ impl App {
                             if moved && selected {
                                 response.scroll_to_me(Some(Align::Center));
                             }
-                            response.on_hover_text(&hit.path);
+                            response.on_hover_text(hit.location());
                         }
                         if self.hits.is_empty() {
                             ui.add_space(62.);
@@ -404,7 +411,7 @@ impl App {
                 if preview { self.start_preview(&ctx); }
                 if let Some(path) = inspect { self.inspect_file(path); }
                 if let Some(path) = open {
-                    let result = crate::platform::open_file(&path);
+                    let result = crate::platform::open_file(&path,&self.config_path.with_file_name("index.sqlite"));
                     crate::trace(&self.config_path.with_file_name("worker-trace.log"), &format!("direct open path={path:?} success={}", result.is_ok()));
                     if let Err(e) = result {
                         self.error = e.to_string();
@@ -412,5 +419,4 @@ impl App {
                 }
             });
     }
-
 }
