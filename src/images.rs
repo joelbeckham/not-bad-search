@@ -136,6 +136,7 @@ pub fn discover(db: &mut Connection, config: &Config) -> Result<()> {
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
     for (id, path, root) in files {
+        if config.source_paused(Path::new(&root)) { continue; }
         let eligible = config.image_folders.iter().any(|p| p == Path::new(&root))
             && Path::new(&path)
                 .extension()
@@ -215,7 +216,7 @@ pub fn process_one(
     if config.images_paused || config.image_folders.is_empty() {
         return Ok(false);
     }
-    let job: Option<(i64,String,String,String,String,i64)>=db.query_row("SELECT j.file_id,f.path,f.root,j.source_hash,j.model,j.attempts FROM image_jobs j JOIN files f ON f.id=j.file_id WHERE j.state IN ('pending','failed') AND j.attempts<3 AND j.retry_at<=?1 AND j.model=?2 AND j.version=?3 ORDER BY j.file_id LIMIT 1",params![now(),config.image_model,VERSION],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).optional()?;
+    let job: Option<(i64,String,String,String,String,i64)>=db.query_row("SELECT j.file_id,f.path,f.root,j.source_hash,j.model,j.attempts FROM image_jobs j JOIN files f ON f.id=j.file_id WHERE j.state IN ('pending','failed') AND j.attempts<3 AND j.retry_at<=?1 AND j.model=?2 AND j.version=?3 AND f.root NOT IN (SELECT value FROM json_each(?4)) ORDER BY j.file_id LIMIT 1",params![now(),config.image_model,VERSION,config.paused_roots_json()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).optional()?;
     let Some((id, path, root, hash, model, attempts)) = job else {
         return Ok(false);
     };
@@ -241,7 +242,7 @@ pub fn process_one(
         cached
     } else {
         let latest = current();
-        if latest.images_paused
+        if latest.images_paused || latest.source_paused(Path::new(&root))
             || latest.image_model != model
             || !latest.image_folders.iter().any(|p| p == Path::new(&root))
         {
@@ -291,7 +292,7 @@ pub fn process_one(
             result.description
         ],
     )?;
-    if latest.images_paused {
+    if latest.images_paused || latest.source_paused(Path::new(&root)) {
         tx.execute(
             "UPDATE image_jobs SET state='pending' WHERE file_id=?1",
             [id],

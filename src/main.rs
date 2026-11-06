@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod appearance;
+mod settings_ui;
 mod inspector_ui;
 mod platform;
 mod preview_ui;
@@ -40,6 +41,7 @@ fn trace(path: &std::path::Path, message: &str) {
     }
 }
 struct App {
+    source_settings: settings_ui::State,
     filters: SearchFilters,
     background_refresh: bool,
     semantic: semantic_worker::Worker,
@@ -68,9 +70,6 @@ struct App {
     events: mpsc::Receiver<Event>,
     config: Config,
     config_path: PathBuf,
-    folders: String,
-    exclusions: String,
-    content_folders: Vec<PathBuf>,
     content_limit_mib: u64,
     image_status: String,
     image_wake: mpsc::SyncSender<bool>,
@@ -174,11 +173,13 @@ fn run() -> Result<()> {
         return Ok(());
     };
     let config_path = data.join("config.toml");
-    let config: Config = if config_path.exists() {
+    let mut config: Config = if config_path.exists() {
         toml::from_str(&std::fs::read_to_string(&config_path)?)?
     } else {
         Config::default()
     };
+    config.migrate_sources();
+    if !config.sources.is_empty() { config.sync_sources(); }
     config.validate()?;
     let db_path = data.join("index.sqlite");
     open_db(&db_path)?;
@@ -260,13 +261,14 @@ fn run() -> Result<()> {
         instance.attach(window)?;
         platform::center_window(window);
         let (hotkey,error)=match platform::Hotkey::register(cc.egui_ctx.clone(),window) {Ok(h)=>(Some(h),String::new()),Err(e)=>(None,e.to_string())};
-        Ok(Box::new(App {background_refresh:false,index_error:String::new(),filters:SearchFilters::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,folders:config.folders.iter().map(|p|p.to_string_lossy()).collect::<Vec<_>>().join("\n"), exclusions:config.exclusions.join("\n"), image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.folders.is_empty(), content_folders:config.content_folders.clone(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
+        Ok(Box::new(App {source_settings:settings_ui::State::default(),background_refresh:false,index_error:String::new(),filters:SearchFilters::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.folders.is_empty(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
     })).map_err(|e|anyhow::anyhow!(e.to_string()))?;
     Ok(())
 }
 impl App {
     fn back(&mut self) {
         if self.settings {
+            if self.source_settings.selected.take().is_some() { return; }
             self.settings = false;
         } else if self.inspector.is_some() {
             self.inspector = None;
@@ -339,25 +341,9 @@ impl App {
         }
     }
     fn save(&mut self) -> Result<()> {
-        let config = Config {
-            folders: self
-                .folders
-                .lines()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(PathBuf::from)
-                .collect(),
-            exclusions: self
-                .exclusions
-                .lines()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-                .collect(),
-            content_folders: self.content_folders.clone(),
-            max_content_bytes: self.content_limit_mib * 1024 * 1024,
-            ..self.config.clone()
-        };
+        let mut config = self.config.clone();
+        config.max_content_bytes = self.content_limit_mib * 1024 * 1024;
+        config.sync_sources();
         config.validate()?;
         std::fs::write(&self.config_path, toml::to_string_pretty(&config)?)
             .context("Saving settings")?;

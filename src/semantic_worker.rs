@@ -119,7 +119,8 @@ impl Worker {
                                 ctx.request_repaint();
                             }
                             // A small batch bounds the time a new query waits behind indexing.
-                            match semantic::index_batch(&mut writer, model, 32) {
+                            let paused_roots = config.lock().unwrap().paused_roots_json();
+                            match semantic::index_batch_excluding(&mut writer, model, 32, &paused_roots) {
                                 Ok(count) => {
                                     dirty |= count > 0;
                                     if count == 0 || report.elapsed() >= Duration::from_secs(1) {

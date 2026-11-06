@@ -93,6 +93,7 @@ pub(crate) fn index(db: &mut Connection, config: &Config) -> Result<Vec<String>>
         .filter(|p| p.is_dir())
         .collect();
     for (file_id, path, root) in files {
+        if config.source_paused(Path::new(&root)) { continue; }
         let supported = Path::new(&path)
             .extension()
             .and_then(|s| s.to_str())

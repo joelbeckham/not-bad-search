@@ -12,6 +12,7 @@ pub mod inspection;
 pub mod preview;
 mod query;
 pub mod semantic;
+pub mod sources;
 mod storage;
 pub use storage::{open_db, open_reader, open_writer};
 
@@ -20,6 +21,7 @@ pub const DEFAULT_IMAGE_MODEL: &str = "gpt-6.1-terra";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    pub sources: Vec<sources::Source>,
     pub semantic_enabled: bool,
     pub semantic_delay_ms: u64,
     pub folders: Vec<PathBuf>,
@@ -35,6 +37,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            sources: vec![],
             semantic_enabled: true,
             semantic_delay_ms: 200,
             folders: vec![],
@@ -56,6 +59,15 @@ impl Default for Config {
 }
 impl Config {
     pub fn validate(&self) -> Result<()> {
+        let mut ids = std::collections::HashSet::new();
+        let mut paths = std::collections::HashSet::new();
+        for source in &self.sources {
+            if source.id.is_empty() || !ids.insert(&source.id) || !paths.insert(source.path.to_string_lossy().to_lowercase()) {
+                bail!("Each source must have a unique ID and folder path");
+            }
+            if source.name.trim().is_empty() { bail!("Give each source a name"); }
+            self.source_matcher(&source.path)?;
+        }
         if !(50..=2000).contains(&self.semantic_delay_ms) {
             bail!("Semantic search delay must be between 50 and 2000 ms");
         }
@@ -202,7 +214,6 @@ pub fn search_filtered(
 /// Symlinks/junctions are never followed, so selected roots bound the traversal.
 pub fn reconcile(db: &mut Connection, config: &Config) -> Result<Vec<String>> {
     config.validate()?;
-    let matcher = config.matcher()?;
     let database: String = db.query_row(
         "SELECT file FROM pragma_database_list WHERE name='main'",
         [],
@@ -232,6 +243,8 @@ pub fn reconcile(db: &mut Connection, config: &Config) -> Result<Vec<String>> {
     tx.commit()?;
     for root in &config.folders {
         let result = (|| -> Result<()> {
+            if config.source_paused(root) { return Ok(()); }
+            let matcher = config.source_matcher(root)?;
             if !root.is_dir() {
                 bail!("Folder unavailable: {}", root.display());
             }

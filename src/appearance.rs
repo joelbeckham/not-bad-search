@@ -64,6 +64,10 @@ impl App {
                         Stroke::new(2., ACCENT),
                     );
                     ui.add_space(8.);
+                    if self.settings {
+                        ui.label(RichText::new("Settings").size(21.).color(TEXT));
+                        return;
+                    }
                     if let Some(preview) = &self.preview {
                         let title = if self.settings {
                             "Settings"
@@ -118,7 +122,9 @@ impl App {
             )
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
-                    let label = if self.settings && self.inspector.is_some() {
+                    let label = if self.settings && self.source_settings.selected.is_some() {
+                        "Back to sources"
+                    } else if self.settings && self.inspector.is_some() {
                         "Back to indexed data"
                     } else if self.settings && self.preview.is_some() {
                         "Back to preview"
@@ -152,7 +158,9 @@ impl App {
                             ui.label(RichText::new("Back to search").size(12.).color(MUTED));
                         } else if self.settings {
                             key(ui, "Esc");
-                            let back_label = if self.inspector.is_some() {
+                            let back_label = if self.source_settings.selected.is_some() {
+                                "Back to sources"
+                            } else if self.inspector.is_some() {
                                 "Back to indexed data"
                             } else if self.preview.is_some() {
                                 "Back to preview"
@@ -405,163 +413,4 @@ impl App {
             });
     }
 
-    fn draw_settings(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                Frame::new()
-                    .inner_margin(Margin::symmetric(16, 10))
-                    .show(ui, |ui| {
-                        ui.label(RichText::new("Make it yours").size(20.).color(TEXT));
-                        ui.label(
-                            RichText::new("Choose where Good Search looks.")
-                                .size(12.)
-                                .color(MUTED),
-                        );
-                        ui.add_space(10.);
-                        ui.label(RichText::new("Selected folders").size(13.));
-                        ui.add(
-                            egui::TextEdit::multiline(&mut self.folders)
-                                .id_salt("folder_input")
-                                .desired_rows(3)
-                                .desired_width(f32::INFINITY)
-                                .font(FontId::proportional(13.)),
-                        );
-                        ui.label(
-                            RichText::new("One Windows or WSL folder path per line.")
-                                .size(11.)
-                                .color(MUTED),
-                        );
-                        ui.add_space(6.);
-                        ui.label(RichText::new("Exclude files & folders").size(13.));
-                        ui.add(
-                            egui::TextEdit::multiline(&mut self.exclusions)
-                                .id_salt("exclusions_input")
-                                .desired_rows(2)
-                                .desired_width(f32::INFINITY)
-                                .font(FontId::proportional(13.)),
-                        );
-                        ui.label(
-                            RichText::new(
-                                "One pattern per line — for example *.tmp or node_modules.",
-                            )
-                            .size(11.)
-                            .color(MUTED),
-                        );
-                        ui.add_space(8.);
-                        ui.label(RichText::new("Search text inside files").size(13.));
-                        ui.label(
-                            RichText::new(
-                                "Opt in per folder · Markdown and UTF-8 text · stored locally",
-                            )
-                            .size(11.)
-                            .color(MUTED),
-                        );
-                        let roots: Vec<std::path::PathBuf> = self
-                            .folders
-                            .lines()
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                            .map(Into::into)
-                            .collect();
-                        self.content_folders.retain(|p| roots.contains(p));
-                        for root in &roots {
-                            let mut enabled = self.content_folders.contains(root);
-                            if ui.checkbox(&mut enabled, root.to_string_lossy()).changed() {
-                                self.content_folders.retain(|p| p != root);
-                                if enabled {
-                                    self.content_folders.push(root.clone());
-                                }
-                            }
-                        }
-                        ui.horizontal(|ui| {
-                            ui.label("Maximum text file size");
-                            ui.add(
-                                egui::DragValue::new(&mut self.content_limit_mib)
-                                    .range(1..=64)
-                                    .suffix(" MiB"),
-                            );
-                        });
-                        ui.add_space(12.);
-                        ui.label(RichText::new("Semantic search").size(13.));
-                        ui.checkbox(&mut self.config.semantic_enabled, "Find related content using local embeddings");
-                        ui.label("Potion 8M runs on your CPU. One-time model download: about 30 MiB. Files and searches stay on this computer.");
-                        ui.horizontal(|ui| {
-                            ui.label("Typing pause before semantic search");
-                            ui.add(egui::DragValue::new(&mut self.config.semantic_delay_ms).range(50..=2000).suffix(" ms"));
-                        });
-                        ui.label(&self.semantic_status);
-                        ui.label("Applies with Save changes. Exact text results appear immediately. Quoted phrases remain strict.");
-                        ui.add_space(12.);
-                        ui.label(RichText::new("Search inside images with OpenAI").size(13.));
-                        ui.label("Selected image folders send PNG, JPEG and WebP images to OpenAI during indexing. API charges apply. Searches stay local.");
-                        self.config.image_folders.retain(|p|roots.contains(p));
-                        for root in &roots {
-                            let mut enabled=self.config.image_folders.contains(root);
-                            if ui.checkbox(&mut enabled,root.to_string_lossy()).changed() {
-                                self.config.image_folders.retain(|p|p!=root);
-                                if enabled { self.config.image_folders.push(root.clone()); }
-                            }
-                        }
-                        ui.horizontal(|ui| {
-                            ui.label("Image analysis model");
-                            egui::ComboBox::from_id_salt("image_analysis_model")
-                                .selected_text(match self.config.image_model.as_str() {
-                                    good_search::DEFAULT_IMAGE_MODEL => "GPT-6.1 Terra (default)",
-                                    "gpt-6-luna" => "GPT-6 Luna",
-                                    _ => "Choose a model",
-                                })
-                                .show_ui(ui, |ui| {
-                                    ui.selectable_value(&mut self.config.image_model, good_search::DEFAULT_IMAGE_MODEL.into(), "GPT-6.1 Terra (default)");
-                                    ui.selectable_value(&mut self.config.image_model, "gpt-6-luna".into(), "GPT-6 Luna");
-                                });
-                        });
-                        ui.label("Apply with Save changes. Changing models reanalyzes selected images and uses your daily request cap.");
-                        ui.horizontal(|ui| {
-                            ui.label("Daily request cap (UTC)");
-                            ui.add(egui::DragValue::new(&mut self.config.image_daily_requests).range(0..=10000));
-                        });
-                        ui.label("Requests include retries. This is a request cap, not a dollar budget.");
-                        ui.checkbox(&mut self.config.images_paused,"Pause image processing (apply with Save changes)");
-                        ui.label(if self.key_saved { "API key saved in Windows Credential Manager" } else { "No API key saved" });
-                        ui.add(egui::TextEdit::singleline(&mut self.api_key_input).password(true).hint_text("OpenAI API key"));
-                        ui.horizontal(|ui| {
-                            if ui.button("Store key").clicked() {
-                                match good_search::credentials::save(&self.api_key_input) {
-                                    Ok(())=>{self.api_key_input.clear();self.key_saved=true;let _=self.image_wake.try_send(false);},
-                                    Err(e)=>self.error=e.to_string(),
-                                }
-                            }
-                            if ui.button("Remove key").clicked() {
-                                match good_search::credentials::remove() {Ok(())=>self.key_saved=false,Err(e)=>self.error=e.to_string()}
-                            }
-                            if ui.button("Retry failed images").clicked() {let _=self.image_wake.try_send(true);}
-                        });
-                        ui.label(&self.image_status);
-                        if ui
-                            .add(
-                                egui::Button::new(RichText::new("Save changes").color(TEXT))
-                                    .fill(Color32::from_rgb(47, 78, 83))
-                                    .min_size(Vec2::new(112., 30.)),
-                            )
-                            .clicked()
-                        {
-                            match self.save() {
-                                Ok(()) => {
-                                    self.settings = false;
-                                    self.focus = true;
-                                }
-                                Err(e) => self.error = e.to_string(),
-                            }
-                        }
-                        if !self.error.is_empty() {
-                            ui.colored_label(Color32::from_rgb(226, 177, 112), &self.error);
-                        }
-                        if !self.index_error.is_empty() {
-                            ui.colored_label(Color32::from_rgb(226, 177, 112), &self.index_error);
-                        }
-                        ui.label(RichText::new(&self.status).size(11.).color(MUTED));
-                    });
-            });
-    }
 }
