@@ -79,14 +79,21 @@ impl App {
                         ui.label(RichText::new("Indexed data").size(21.).color(TEXT));
                         return;
                     }
+                    let search_id = ui.make_persistent_id("search_input");
+                    let search_screen = !self.settings && self.inspector.is_none() && self.preview.is_none();
+                    // Claim focus before TextEdit processes this frame's keyboard events,
+                    // including the first keystroke after clicking or scrolling elsewhere.
+                    if search_screen {
+                        ui.memory_mut(|memory| memory.request_focus(search_id));
+                    }
                     let input = ui.add(
                         egui::TextEdit::singleline(&mut self.query)
-                            .id_salt("search_input")
+                            .id(search_id)
                             .frame(Frame::NONE)
                             .font(FontId::proportional(21.))
                             .desired_width(f32::INFINITY),
                     );
-                    if self.focus && !self.settings {
+                    if search_screen || (self.focus && !self.settings) {
                         input.request_focus();
                         self.focus = false;
                     }

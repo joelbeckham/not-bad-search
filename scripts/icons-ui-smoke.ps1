@@ -67,6 +67,19 @@ try {
  $null=Wait-Trace 'accepted id=.*hits=5'
  Start-Sleep -Milliseconds 500
  Capture 'file-icons'
+ # Query input remains active after navigating results, clicking blank space,
+ # scrolling the results area, and changing a filter.
+ Keys('{DOWN}');Keys('{DOWN}');Clear-Trace;Keys('x')
+ $null=Wait-Trace 'accepted id=.*hits=0'
+ Clear-Trace;Keys('{BACKSPACE}');$null=Wait-Trace 'accepted id=.*hits=5'
+ [DesignProbe]::Click($script:h,500,520)
+ [DesignProbe]::mouse_event(0x800,0,0,4294967176,[UIntPtr]::Zero)
+ Clear-Trace;Keys('x');$null=Wait-Trace 'accepted id=.*hits=0'
+ Clear-Trace;Keys('{BACKSPACE}');$null=Wait-Trace 'accepted id=.*hits=5'
+ $filterY=if((Get-Content "$data\ui-trace.log" -Raw).Contains('Hot key is already registered')){118}else{95}
+ [DesignProbe]::Click($script:h,33,$filterY)
+ Clear-Trace;Keys('x');$null=Wait-Trace 'accepted id=.*hits=0'
+ Clear-Trace;Keys('{BACKSPACE}');$null=Wait-Trace 'accepted id=.*hits=5'
  Keys('^a');Keys('{BACKSPACE}');Capture 'cleared-search'
  Write-Output "PASS: five file types displayed. Capture: $base\file-icons.png"
 } finally {
