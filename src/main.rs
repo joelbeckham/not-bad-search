@@ -199,6 +199,15 @@ fn run() -> Result<()> {
         ..Default::default()
     };
     eframe::run_native("Good Search",options,Box::new(move |cc| {
+        let mut fonts = egui::FontDefinitions::default();
+        let mut dm_sans = egui::FontData::from_static(include_bytes!("../assets/fonts/DMSans.ttf"));
+        dm_sans.tweak.coords.push(b"wght", 400.0);
+        dm_sans.tweak.coords.push(b"opsz", 14.0);
+        fonts.font_data.insert("DM Sans".into(), dm_sans.into());
+        let proportional = fonts.families.entry(egui::FontFamily::Proportional).or_default();
+        proportional.insert(0, "DM Sans".into());
+        fonts.families.entry(egui::FontFamily::Monospace).or_default().push("DM Sans".into());
+        cc.egui_ctx.set_fonts(fonts);
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         egui_extras::install_image_loaders(&cc.egui_ctx);
         let (tx,events)=mpsc::channel();
