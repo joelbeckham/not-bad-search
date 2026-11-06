@@ -188,7 +188,7 @@ fn run() -> Result<()> {
             .with_title("Good Search")
             .with_decorations(false)
             .with_transparent(true)
-            .with_inner_size([780., 500.])
+            .with_inner_size([1014., 650.])
             .with_min_inner_size([600., 360.]),
         ..Default::default()
     };
