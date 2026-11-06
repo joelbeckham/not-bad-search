@@ -84,7 +84,6 @@ impl App {
                             .id_salt("search_input")
                             .frame(Frame::NONE)
                             .font(FontId::proportional(21.))
-                            .hint_text(RichText::new("Search your files…").color(MUTED))
                             .desired_width(f32::INFINITY),
                     );
                     if self.focus && !self.settings {

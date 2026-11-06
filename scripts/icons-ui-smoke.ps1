@@ -62,10 +62,12 @@ try {
  [void][DesignProbe]::SetWindowPos($script:h,[IntPtr](-1),0,0,0,0,0x43)
  Start-Sleep -Milliseconds 750
  [DesignProbe]::Click($script:h,130,36)
+ Capture 'empty-search'
  Keys('sample')
  $null=Wait-Trace 'accepted id=.*hits=5'
  Start-Sleep -Milliseconds 500
  Capture 'file-icons'
+ Keys('^a');Keys('{BACKSPACE}');Capture 'cleared-search'
  Write-Output "PASS: five file types displayed. Capture: $base\file-icons.png"
 } finally {
  if(-not $proc.HasExited){Stop-Process -Id $proc.Id}
