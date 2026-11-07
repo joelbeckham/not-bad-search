@@ -246,19 +246,7 @@ impl App {
                 let mut filters_changed = false;
                 ui.horizontal(|ui| {
                     ui.add_space(8.);
-                    for (value, label, help) in [
-                        (&mut self.filters.text, "Text", "Search the contents of text files"),
-                        (&mut self.filters.images, "Images", "Search extracted image text and descriptions"),
-                    ] {
-                        if ui.selectable_label(*value, label).on_hover_text(help).clicked() { *value = !*value; filters_changed=true; }
-                    }
-                    ui.separator();
-                    for (value, label, help) in [
-                        (&mut self.filters.semantic, "Semantic", "Include related content using local embeddings (requires semantic search enabled in Settings)"),
-                        (&mut self.filters.text_matches, "Text matches", "Include filename matches and literal matches in enabled content types"),
-                    ] {
-                        if ui.selectable_label(*value, label).on_hover_text(help).clicked() { *value = !*value; filters_changed=true; }
-                    }
+                    filters_changed = self.draw_filters(ui);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add_space(12.);
                         ui.label(
@@ -282,10 +270,10 @@ impl App {
                 let moved = ctx.input(|i| {
                     i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::ArrowUp)
                 });
-                if self.inspector.is_none() && ctx.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                if !egui::Popup::is_any_open(&ctx) && self.inspector.is_none() && ctx.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
                     self.selected = (self.selected + 1).min(self.hits.len().saturating_sub(1));
                 }
-                if self.inspector.is_none() && ctx.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                if !egui::Popup::is_any_open(&ctx) && self.inspector.is_none() && ctx.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
                     self.selected = self.selected.saturating_sub(1);
                 }
                 let mut open = None;
@@ -380,7 +368,7 @@ impl App {
                                 let (heading, detail) = if self.query.trim().is_empty() {
                                     (
                                         "Find something good.",
-                                        "Search filenames and enabled text content in your selected folders.",
+                                        "Search names, titles and indexed content from your sources.",
                                     )
                                 } else if self.searching || self.semantic_pending || self.semantic_due.is_some() {
                                     ("Searching your files…", "Results will appear here.")
@@ -391,8 +379,8 @@ impl App {
                                     )
                                 } else {
                                     (
-                                        "No matching files",
-                                        "Try another name or check your selected folders.",
+                                        "No matching results",
+                                        "Try another search or adjust your filters.",
                                     )
                                 };
                                 ui.label(RichText::new(heading).size(18.).color(TEXT));
@@ -401,7 +389,7 @@ impl App {
                             });
                         }
                     });
-                if crate::preview_ui::fresh_enter(&ctx) {
+                if !egui::Popup::is_any_open(&ctx) && crate::preview_ui::fresh_enter(&ctx) {
                     if ctx.input(|i| i.modifiers.ctrl) {
                         open = self.hits.get(self.selected).map(|h| h.path.clone());
                     } else {

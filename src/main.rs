@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod appearance;
+mod filter_ui;
 mod inspector_ui;
 mod jira_worker;
 mod platform;
@@ -46,6 +47,7 @@ struct App {
     source_settings: settings_ui::State,
     remote_wake: mpsc::SyncSender<()>,
     filters: SearchFilters,
+    source_selection: good_search::filters::SourceSelection,
     background_refresh: bool,
     semantic: semantic_worker::Worker,
     semantic_status: String,
@@ -276,7 +278,7 @@ fn run() -> Result<()> {
         instance.attach(window)?;
         platform::center_window(window);
         let (hotkey,error)=match platform::Hotkey::register(cc.egui_ctx.clone(),window) {Ok(h)=>(Some(h),String::new()),Err(e)=>(None,e.to_string())};
-        Ok(Box::new(App {remote_wake,source_settings:settings_ui::State::default(),background_refresh:false,index_error:String::new(),filters:SearchFilters::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.sources.is_empty(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
+        Ok(Box::new(App {remote_wake,source_settings:settings_ui::State::default(),background_refresh:false,index_error:String::new(),filters:SearchFilters::default(),source_selection:Default::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.sources.is_empty(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
     })).map_err(|e|anyhow::anyhow!(e.to_string()))?;
     Ok(())
 }
@@ -315,6 +317,7 @@ impl App {
         self.trace_results = true;
     }
     fn submit(&mut self) {
+        self.filters.roots = self.source_selection.roots(&self.config.sources);
         self.background_refresh = false;
         self.semantic.cancel();
         self.semantic_hits = None;
@@ -349,7 +352,7 @@ impl App {
             &self.config_path.with_file_name("worker-trace.log"),
             &format!("submitted id={} query={:?}", self.generation, self.query),
         );
-        *self.pending.lock().unwrap() = Some((self.generation, self.query.clone(), self.filters));
+        *self.pending.lock().unwrap() = Some((self.generation, self.query.clone(), self.filters.clone()));
         if matches!(
             self.wake.try_send(()),
             Err(mpsc::TrySendError::Disconnected(_))
@@ -449,7 +452,8 @@ impl eframe::App for App {
                     if !ready {
                         self.semantic_pending = false;
                         self.semantic_due = None;
-                        if self.background_refresh && self.completed_generation == self.generation {
+                        self.semantic_hits = None;
+                        if self.completed_generation == self.generation {
                             self.publish_hits(self.lexical_hits.clone());
                         }
                     }
@@ -520,7 +524,9 @@ impl eframe::App for App {
             self.focus = false;
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-            if self.inspector.is_some() || self.settings || self.preview.is_some() {
+            if egui::Popup::is_any_open(&ctx) {
+                egui::Popup::close_all(&ctx);
+            } else if self.inspector.is_some() || self.settings || self.preview.is_some() {
                 self.back();
             } else if !self.query.is_empty() {
                 self.query.clear();
@@ -537,7 +543,7 @@ impl eframe::App for App {
                 self.semantic_due = None;
                 self.semantic_pending = true;
                 self.semantic
-                    .request(self.generation, self.query.clone(), self.filters);
+                    .request(self.generation, self.query.clone(), self.filters.clone());
             } else {
                 ctx.request_repaint_after(due.saturating_duration_since(Instant::now()));
             }

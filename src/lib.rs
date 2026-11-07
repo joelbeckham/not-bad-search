@@ -153,23 +153,8 @@ pub(crate) fn remote_locations(db: &Connection, hits: &mut [Hit]) -> Result<()> 
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct SearchFilters {
-    pub text: bool,
-    pub images: bool,
-    pub semantic: bool,
-    pub text_matches: bool,
-}
-impl Default for SearchFilters {
-    fn default() -> Self {
-        Self {
-            text: true,
-            images: true,
-            semantic: true,
-            text_matches: true,
-        }
-    }
-}
+pub mod filters;
+pub use filters::SearchFilters;
 pub fn search(db: &Connection, query: &str, limit: usize) -> Result<Vec<Hit>> {
     search_filtered(db, query, limit, SearchFilters::default())
 }
@@ -179,7 +164,7 @@ pub fn search_filtered(
     limit: usize,
     options: SearchFilters,
 ) -> Result<Vec<Hit>> {
-    if !options.text_matches {
+    if !options.text_matches || (!options.text && !options.images) {
         return Ok(vec![]);
     }
     let terms = query::terms(query);
@@ -213,6 +198,19 @@ pub fn search_filtered(
             values.push(term.clone().into());
             filters.push(format!("instr(f.folded,?{})>0", values.len()));
         }
+    }
+    let roots = serde_json::to_string(&options.roots)?;
+    values.push(roots.into());
+    let root_param = values.len();
+    filters.push(format!(
+        "(?{root_param}='null' OR f.root IN (SELECT value FROM json_each(?{root_param})))"
+    ));
+    let image = "(f.path NOT LIKE 'good-search://jira/%' AND (EXISTS(SELECT 1 FROM documents d WHERE d.file_id=f.id AND d.kind IN ('image_text','image_description')) OR lower(f.name) GLOB '*.png' OR lower(f.name) GLOB '*.jpg' OR lower(f.name) GLOB '*.jpeg' OR lower(f.name) GLOB '*.webp' OR lower(f.name) GLOB '*.gif' OR lower(f.name) GLOB '*.bmp' OR lower(f.name) GLOB '*.tif' OR lower(f.name) GLOB '*.tiff' OR lower(f.name) GLOB '*.svg' OR lower(f.name) GLOB '*.avif'))";
+    if !options.images {
+        filters.push(format!("NOT {image}"));
+    }
+    if !options.text {
+        filters.push(image.into());
     }
     values.push(q.into());
     let exact = values.len();

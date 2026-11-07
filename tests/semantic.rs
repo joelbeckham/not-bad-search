@@ -7,6 +7,131 @@ use good_search::{
 use rusqlite::Connection;
 
 struct Fake;
+
+#[test]
+fn mixed_sources_content_matching_and_empty_filters() -> Result<()> {
+    use good_search::{jira, search_filtered, SearchFilters};
+    let mut db = open_db(std::path::Path::new(":memory:"))?;
+    fixture(&db)?;
+    db.execute_batch(
+        "UPDATE files SET name='needle.md',folded='needle.md'; UPDATE chunks SET body='needle';
+        INSERT INTO files VALUES(2,'pictures','C:/needle.png','needle.png','needle.png');
+        INSERT INTO documents VALUES(2,2,'image_text','image',1,1,'ready','');
+        INSERT INTO chunks VALUES(3,2,0,'',1,'needle','imagehash');",
+    )?;
+    struct Jira;
+    impl jira::Provider for Jira {
+        fn page(
+            &mut self,
+            _: &jira::Settings,
+            _: &str,
+            _: Option<&str>,
+        ) -> Result<serde_json::Value> {
+            Ok(
+                serde_json::json!({"isLast":true,"issues":[{"id":"42","key":"CORE-42","fields":{"summary":"needle.png","updated":"2026-11-06T12:00:00Z","description":null}}]}),
+            )
+        }
+        fn issue(&mut self, _: &jira::Settings, _: &str) -> Result<serde_json::Value> {
+            unreachable!()
+        }
+    }
+    jira::sync(
+        &mut db,
+        "jira-source",
+        &Default::default(),
+        &mut Jira,
+        || false,
+    )?;
+    semantic::index_batch(&mut db, &Fake, 32)?;
+    let mut index = VectorIndex::default();
+    index.refresh(&db)?;
+    for (roots, text, images, expected) in [
+        (None, true, true, 3),
+        (None, true, false, 2),
+        (None, false, true, 1),
+        (Some(vec!["jira:jira-source".into()]), true, true, 1),
+        (Some(vec!["jira:jira-source".into()]), false, true, 0),
+        (Some(vec!["root".into(), "pictures".into()]), true, true, 2),
+        (Some(vec![]), true, true, 0),
+        (None, false, false, 0),
+    ] {
+        let filters = SearchFilters {
+            roots,
+            text,
+            images,
+            ..Default::default()
+        };
+        assert_eq!(
+            search_filtered(&db, "needle", 100, filters.clone())?.len(),
+            expected
+        );
+        assert_eq!(
+            index.search_filtered(&db, vector(), 100, filters)?.len(),
+            expected
+        );
+    }
+    assert!(search_filtered(
+        &db,
+        "needle",
+        100,
+        SearchFilters {
+            text_matches: false,
+            ..Default::default()
+        }
+    )?
+    .is_empty());
+    assert!(index
+        .search_filtered(
+            &db,
+            vector(),
+            100,
+            SearchFilters {
+                semantic: false,
+                ..Default::default()
+            }
+        )?
+        .is_empty());
+    // Excluded sources must not consume the candidate limit, even for filename hits.
+    for id in 100..1200 {
+        db.execute(
+            "INSERT INTO files VALUES(?1,'excluded',?2,?2,?2)",
+            rusqlite::params![id, format!("needle-{id}")],
+        )?;
+    }
+    let restricted = SearchFilters {
+        roots: Some(vec!["jira:jira-source".into()]),
+        ..Default::default()
+    };
+    let hits = search_filtered(&db, "needle", 1, restricted)?;
+    assert_eq!(hits.len(), 1);
+    assert!(hits[0].original_url.is_some());
+    Ok(())
+}
+
+#[test]
+fn source_groups_dynamic_all_and_reset() {
+    use good_search::{filters::SourceSelection, sources::Source};
+    let mut sources = vec![Source::folder("C:/notes".into()), Source::jira_source()];
+    sources[0].paused = true;
+    let mut selection = SourceSelection::default();
+    assert_eq!(selection.roots(&sources), None);
+    let folder = vec![sources[0].id.clone()];
+    selection.set(&folder, false, &sources);
+    assert_eq!(
+        selection.roots(&sources).unwrap(),
+        vec![format!("jira:{}", sources[1].id)]
+    );
+    selection.set(&folder, true, &sources);
+    assert_eq!(selection.roots(&sources).unwrap().len(), 2); // Paused source remains searchable.
+    sources.push(Source::folder("C:/new".into()));
+    assert!(!selection.contains(&sources[2].id));
+    selection = Default::default(); // Reset restores dynamic All, including future sources.
+    assert!(selection.contains(&sources[2].id));
+    assert_eq!(selection.roots(&sources), None);
+    let ids = sources.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+    selection.set(&ids, false, &sources);
+    assert_eq!(selection.roots(&sources), Some(vec![]));
+}
 impl Embedder for Fake {
     fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         Ok(texts
@@ -149,7 +274,7 @@ fn source_and_match_filters_apply_before_ranking() -> Result<()> {
     INSERT INTO files VALUES(3,'root','C:/dog.bin','dog.bin','dog.bin');",
     )?;
     let all = SearchFilters::default();
-    assert_eq!(search_filtered(&db, "dog", 100, all)?.len(), 3);
+    assert_eq!(search_filtered(&db, "dog", 100, all.clone())?.len(), 3);
     assert_eq!(
         search_filtered(
             &db,
@@ -157,15 +282,24 @@ fn source_and_match_filters_apply_before_ranking() -> Result<()> {
             100,
             SearchFilters {
                 images: false,
-                ..all
+                ..all.clone()
             }
         )?
         .len(),
         2
     );
     assert_eq!(
-        search_filtered(&db, "dog", 100, SearchFilters { text: false, ..all })?.len(),
-        2
+        search_filtered(
+            &db,
+            "dog",
+            100,
+            SearchFilters {
+                text: false,
+                ..all.clone()
+            }
+        )?
+        .len(),
+        1
     );
     let names = search_filtered(
         &db,
@@ -174,37 +308,50 @@ fn source_and_match_filters_apply_before_ranking() -> Result<()> {
         SearchFilters {
             text: false,
             images: false,
-            ..all
+            ..all.clone()
         },
     )?;
-    assert_eq!(names.len(), 1);
-    assert_eq!(names[0].name, "dog.bin");
+    assert!(names.is_empty());
+
     assert!(search_filtered(
         &db,
         "dog",
         100,
         SearchFilters {
             text_matches: false,
-            ..all
+            ..all.clone()
         }
     )?
     .is_empty());
     semantic::index_batch(&mut db, &Fake, 32)?;
     let mut index = VectorIndex::default();
     index.refresh(&db)?;
-    assert_eq!(index.search_filtered(&db, vector(), 100, all)?.len(), 2);
+    assert_eq!(
+        index
+            .search_filtered(&db, vector(), 100, all.clone())?
+            .len(),
+        2
+    );
     let text = index.search_filtered(
         &db,
         vector(),
         100,
         SearchFilters {
             images: false,
-            ..all
+            ..all.clone()
         },
     )?;
     assert_eq!(text.len(), 1);
     assert_eq!(text[0].name, "one.md");
-    let images = index.search_filtered(&db, vector(), 100, SearchFilters { text: false, ..all })?;
+    let images = index.search_filtered(
+        &db,
+        vector(),
+        100,
+        SearchFilters {
+            text: false,
+            ..all.clone()
+        },
+    )?;
     assert_eq!(images.len(), 1);
     assert_eq!(images[0].name, "photo.png");
     assert!(index
@@ -214,7 +361,7 @@ fn source_and_match_filters_apply_before_ranking() -> Result<()> {
             100,
             SearchFilters {
                 semantic: false,
-                ..all
+                ..all.clone()
             }
         )?
         .is_empty());
@@ -226,7 +373,7 @@ fn source_and_match_filters_apply_before_ranking() -> Result<()> {
             SearchFilters {
                 text: false,
                 images: false,
-                ..all
+                ..all.clone()
             }
         )?
         .is_empty());
@@ -238,7 +385,7 @@ fn source_and_match_filters_apply_before_ranking() -> Result<()> {
                 100,
                 SearchFilters {
                     text_matches: false,
-                    ..all
+                    ..all.clone()
                 }
             )?
             .len(),

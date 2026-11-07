@@ -125,7 +125,13 @@ A low-priority worker embeds ready chunks in batches, outside write transactions
 
 Run `embedding-bench MODEL_FOLDER NEW_DATABASE` for deterministic relevance checks and a 10,000-chunk Windows benchmark. `scripts/semantic-ui-smoke.ps1` checks native debounce, repeated/replaced queries, quotes, preview navigation, clearing, memory and hidden idle CPU with synthetic local fixtures.
 
-The search header has four session-only toggles: **Text**, **Images**, **Semantic**, and **Text matches**, all on at launch. Text/Images filter extracted content before ranking; filename matches remain available whenever Text matches is on. Semantic controls the semantic pass for this search and also requires semantic search enabled in Settings. Changing a toggle reruns the query and invalidates pending results. Filters do not change indexing or upload settings.
+Three multiselect menus below the search box control results:
+
+- **Sources:** select entire Folders/Jira groups or individual sources. **All sources** is dynamic and automatically includes newly added sources. Paused sources remain searchable using their existing index.
+- **Content:** **Text** includes text items from any source, including Jira titles/descriptions and local Markdown. **Image** includes image filenames and extracted image text/descriptions. Non-image filenames are categorized as Text; a Jira title ending in an image extension remains Text.
+- **Matching:** **Keyword** includes names/titles and literal content matches; **Semantic** uses local embeddings. Semantic is disabled with an explanation when unavailable; there is no forced fallback to Keyword.
+
+Options within a menu combine with OR, and menus combine with AND. All options start selected. Empty selections are allowed and produce no results. **Reset filters** restores dynamic All sources and both content/matching options. Selections survive hiding/reopening the window but reset on application restart. Source choices use stable source IDs, so renaming a source or editing its path preserves the selection. Changing a filter reruns the query and invalidates pending results; source/content restrictions apply before ranking limits in both search paths. Filters never change indexing, upload settings or pause state. Escape closes an open menu before clearing or hiding search.
 
 Search results use bundled Catppuccin Mocha file icons (MIT): 390 icons with upstream filename and extension associations. Exact names take precedence over compound extensions; matching is case-insensitive and unknown files use a document outline. See assets/catppuccin/README.md for provenance and regeneration. Icons render natively and are cached locally.
 

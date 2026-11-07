@@ -130,7 +130,7 @@ pub fn index_batch_excluding(
 
 #[derive(Default)]
 pub struct VectorIndex {
-    entries: Vec<(i64, i64, String, Vec<f32>, bool)>,
+    entries: Vec<(i64, i64, String, Vec<f32>, bool, String)>,
     data_version: Option<i64>,
 }
 impl VectorIndex {
@@ -145,11 +145,13 @@ impl VectorIndex {
         if self.data_version == Some(version) {
             return Ok(());
         }
-        let rows: Vec<(i64,i64,String,Vec<u8>,bool)>=db.prepare("SELECT e.chunk_id,d.file_id,e.content_hash,e.vector,d.kind='text' FROM embeddings e JOIN chunks c ON c.id=e.chunk_id AND c.content_hash=e.content_hash JOIN documents d ON d.id=c.document_id WHERE e.model=?1 AND e.dimensions=?2 AND d.status='ready'")?
-            .query_map(params![MODEL,DIMENSIONS as i64],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?.collect::<rusqlite::Result<_>>()?;
+        let rows: Vec<(i64,i64,String,Vec<u8>,bool,String)>=db.prepare("SELECT e.chunk_id,d.file_id,e.content_hash,e.vector,d.kind='text',f.root FROM embeddings e JOIN chunks c ON c.id=e.chunk_id AND c.content_hash=e.content_hash JOIN documents d ON d.id=c.document_id JOIN files f ON f.id=d.file_id WHERE e.model=?1 AND e.dimensions=?2 AND d.status='ready'")?
+            .query_map(params![MODEL,DIMENSIONS as i64],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)))?.collect::<rusqlite::Result<_>>()?;
         let entries = rows
             .into_iter()
-            .map(|(id, file, hash, blob, text)| Ok((id, file, hash, decode(&blob)?, text)))
+            .map(|(id, file, hash, blob, text, root)| {
+                Ok((id, file, hash, decode(&blob)?, text, root))
+            })
             .collect::<Result<_>>()?;
         self.entries = entries;
         self.data_version = Some(version);
@@ -176,7 +178,14 @@ impl VectorIndex {
             return Ok(vec![]);
         }
         let mut best: HashMap<i64, (i64, f32, &str)> = HashMap::new();
-        for (id, file, hash, v, text) in &self.entries {
+        for (id, file, hash, v, text, root) in &self.entries {
+            if filters
+                .roots
+                .as_ref()
+                .is_some_and(|roots| !roots.contains(root))
+            {
+                continue;
+            }
             if (*text && !filters.text) || (!*text && !filters.images) {
                 continue;
             }

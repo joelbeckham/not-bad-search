@@ -29,9 +29,26 @@ pub(super) struct State {
 }
 impl App {
     fn draw_jira_source(&mut self, ui: &mut egui::Ui, index: usize) {
+        let saved_paused = self
+            .shared_config
+            .lock()
+            .unwrap()
+            .sources
+            .iter()
+            .find(|s| s.id == self.config.sources[index].id)
+            .map(|s| s.paused);
         let source = &mut self.config.sources[index];
         ui.heading(&source.name);
         ui.label("Jira through Bifrost · ordinary account · read-only");
+        source_status_card(
+            ui,
+            self.source_settings
+                .stats
+                .iter()
+                .find(|s| s.id == source.id),
+            &mut source.paused,
+            saved_paused,
+        );
         ui.label("Name");
         ui.text_edit_singleline(&mut source.name);
         let settings = source.jira.get_or_insert_with(Default::default);
@@ -58,20 +75,9 @@ impl App {
             ui.label("Issues per page");
             ui.add(egui::DragValue::new(&mut settings.page_size).range(1..=100));
         });
-        ui.checkbox(
-            &mut source.paused,
-            "Pause syncing (save to apply or cancel an active run)",
-        );
+
         ui.label("Indexes summaries and descriptions only. Comments and attachment contents are excluded. Search and previews use the local index, never Jira.");
         ui.weak("Missing issues are retained: deletion/access-change feeds are unverified. Inspect an issue's local sync time and source freshness before relying on cached content.");
-        if let Some(stats) = self
-            .source_settings
-            .stats
-            .iter()
-            .find(|s| s.id == source.id)
-        {
-            draw_status(ui, stats, source.paused, true);
-        }
         ui.label(&self.source_settings.remote_status);
         ui.horizontal(|ui| {
             if ui.button("Sync enabled Jira sources now").clicked() {
@@ -228,7 +234,10 @@ impl App {
         });
         ui.separator();
         ui.horizontal(|ui| {
-            if ui.button("Save changes").clicked() {
+            if self.source_settings.selected.is_some() && action_icon(ui, false).clicked() {
+                self.source_settings.selected = None;
+            }
+            if action_icon(ui, true).clicked() {
                 match self.save() {
                     Ok(()) => {
                         self.source_settings.checked = None;
@@ -263,10 +272,6 @@ impl App {
         }
         let selected = self.source_settings.selected.clone();
         if let Some(id) = selected {
-            if ui.button("Back to sources").clicked() {
-                self.source_settings.selected = None;
-                return;
-            }
             let Some(index) = self.config.sources.iter().position(|s| s.id == id) else {
                 self.source_settings.selected = None;
                 return;
@@ -275,9 +280,23 @@ impl App {
                 self.draw_jira_source(ui, index);
                 return;
             }
+            let saved_paused = self
+                .shared_config
+                .lock()
+                .unwrap()
+                .sources
+                .iter()
+                .find(|s| s.id == self.config.sources[index].id)
+                .map(|s| s.paused);
             let source = &mut self.config.sources[index];
             ui.heading(&source.name);
             ui.weak("Folder source · Windows and WSL paths supported");
+            source_status_card(
+                ui,
+                self.source_settings.stats.iter().find(|s| s.id == id),
+                &mut source.paused,
+                saved_paused,
+            );
             ui.label("Name");
             ui.text_edit_singleline(&mut source.name);
             ui.label("Folder path");
@@ -296,10 +315,7 @@ impl App {
             if source.images {
                 ui.weak("PNG, JPEG and WebP files are sent to OpenAI during indexing. API charges apply.");
             }
-            ui.checkbox(
-                &mut source.paused,
-                "Pause this source's background processing",
-            );
+
             ui.weak(
                 "Existing results stay searchable. An operation already in progress may finish.",
             );
@@ -323,11 +339,6 @@ impl App {
             }
             ui.weak("One pattern per line, e.g. *.tmp or node_modules.");
             ui.separator();
-            if let Some(stats) = self.source_settings.stats.iter().find(|s| s.id == id) {
-                draw_status(ui, stats, source.paused, true);
-            } else {
-                ui.label("Save this source to begin discovery.");
-            }
             let root = source.path.clone();
             ui.horizontal(|ui| {
                 if ui.button("Check for changes").clicked(){let _=self.index_wake.try_send(());self.source_settings.checked=None;}
@@ -381,7 +392,13 @@ impl App {
         if !self.source_settings.error.is_empty() {
             ui.colored_label(Color32::LIGHT_RED, &self.source_settings.error);
         }
+        let saved_config = self.shared_config.lock().unwrap().clone();
         for source in &self.config.sources {
+            let paused = saved_config
+                .sources
+                .iter()
+                .find(|s| s.id == source.id)
+                .map_or(source.paused, |s| s.paused);
             egui::Frame::new()
                 .fill(Color32::from_rgb(34, 36, 39))
                 .corner_radius(6)
@@ -389,6 +406,12 @@ impl App {
                 .show(ui, |ui| {
                     ui.set_min_width((ui.available_width() - 4.).max(0.));
                     ui.horizontal(|ui| {
+                        ui.add(status_icon(paused).sense(egui::Sense::hover()))
+                            .on_hover_text(if paused {
+                                "Paused"
+                            } else {
+                                "Background processing enabled"
+                            });
                         if ui.button(RichText::new(&source.name).size(17.)).clicked() {
                             self.source_settings.selected = Some(source.id.clone());
                         }
@@ -409,7 +432,7 @@ impl App {
                         .iter()
                         .find(|s| s.id == source.id)
                     {
-                        draw_status(ui, stats, source.paused, false);
+                        draw_status(ui, stats, paused, false);
                     } else {
                         ui.weak("Not indexed yet · save changes to begin");
                     }
@@ -527,6 +550,120 @@ impl App {
         ui.label(&self.image_status);
     }
 }
+fn action_icon(ui: &mut egui::Ui, save: bool) -> egui::Response {
+    let label = if save {
+        "Save changes"
+    } else {
+        "Back to sources"
+    };
+    let response = ui
+        .add(egui::Button::new("").min_size(egui::vec2(32., 28.)))
+        .on_hover_text(label);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    let c = response.rect.center();
+    let stroke = egui::Stroke::new(1.7, ui.visuals().text_color());
+    let point = |x, y| c + egui::vec2(x, y);
+    let line = |a, b| {
+        ui.painter().line_segment([a, b], stroke);
+    };
+    if save {
+        let points = vec![
+            point(-8., -8.),
+            point(5., -8.),
+            point(8., -5.),
+            point(8., 8.),
+            point(-8., 8.),
+            point(-8., -8.),
+        ];
+        ui.painter().add(egui::Shape::line(points, stroke));
+        for (a, b) in [
+            ((-4., -8.), (-4., -2.)),
+            ((-4., -2.), (4., -2.)),
+            ((4., -2.), (4., -8.)),
+            ((-4., 8.), (-4., 3.)),
+            ((-4., 3.), (4., 3.)),
+            ((4., 3.), (4., 8.)),
+        ] {
+            line(point(a.0, a.1), point(b.0, b.1));
+        }
+    } else {
+        line(point(8., 0.), point(-8., 0.));
+        line(point(-8., 0.), point(-2., -6.));
+        line(point(-8., 0.), point(-2., 6.));
+    }
+    response
+}
+
+fn status_icon(paused: bool) -> egui::Image<'static> {
+    let (uri, svg): (&str, &[u8]) = if paused {
+        ("bytes://status/paused.svg", br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M6 4v12M14 4v12" stroke="#f0be64" stroke-width="3"/></svg>"##)
+    } else {
+        ("bytes://status/enabled.svg", br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M5 3l12 7-12 7z" fill="#78c3cc"/></svg>"##)
+    };
+    egui::Image::from_bytes(uri, svg).fit_to_exact_size(egui::vec2(20., 20.))
+}
+
+fn source_status_card(
+    ui: &mut egui::Ui,
+    stats: Option<&Status>,
+    draft_paused: &mut bool,
+    saved_paused: Option<bool>,
+) {
+    let paused = saved_paused.unwrap_or(*draft_paused);
+    let color = if paused {
+        Color32::from_rgb(240, 190, 100)
+    } else {
+        Color32::from_rgb(120, 195, 204)
+    };
+    egui::Frame::new()
+        .fill(Color32::from_rgb(34, 36, 39))
+        .corner_radius(6)
+        .inner_margin(12)
+        .show(ui, |ui| {
+            ui.set_min_width((ui.available_width() - 4.).max(0.));
+            let label = if *draft_paused {
+                "Paused · Resume"
+            } else {
+                "Enabled · Pause"
+            };
+            let response = ui
+                .add(
+                    egui::Button::image_and_text(
+                        status_icon(*draft_paused),
+                        RichText::new(label).size(17.).strong(),
+                    )
+                    .min_size(egui::vec2(190., 36.)),
+                )
+                .on_hover_text("Toggle background processing. Save changes to apply.");
+            if response.clicked() {
+                *draft_paused = !*draft_paused;
+            }
+            if paused {
+                ui.label("This source will not import updates while paused.");
+            }
+            if saved_paused.is_some_and(|saved| saved != *draft_paused) {
+                ui.colored_label(
+                    color,
+                    if *draft_paused {
+                        "Pending change: pause processing. Save to apply."
+                    } else {
+                        "Pending change: resume processing. Save to apply."
+                    },
+                );
+            }
+            if let Some(stats) = stats {
+                draw_status(ui, stats, paused, true);
+            } else {
+                ui.weak(if saved_paused.is_none() {
+                    "Save this source to begin."
+                } else {
+                    "Loading source status…"
+                });
+            }
+        });
+    ui.add_space(8.);
+}
+
 fn draw_status(ui: &mut egui::Ui, s: &Status, paused: bool, detail: bool) {
     if let Some(status) = &s.remote_status {
         ui.label(format!(
