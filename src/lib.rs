@@ -140,6 +140,7 @@ pub struct Hit {
     pub timestamp: Option<i64>,
     pub original_url: Option<String>,
     pub jira: Option<jira::Metadata>,
+    pub gmail: Option<gmail::Metadata>,
     pub slack: bool,
     pub path: String,
     pub name: String,
@@ -166,6 +167,7 @@ pub(crate) fn remote_locations(db: &Connection, hits: &mut [Hit]) -> Result<()> 
     }
     for hit in hits.iter_mut().filter(|h| h.original_url.is_some()) {
         hit.slack = db.query_row("SELECT r.content_format='slack' FROM files f LEFT JOIN attachments a ON a.file_id=f.id JOIN remote_items r ON r.file_id=coalesce(a.parent_file_id,f.id) WHERE f.path=?1",[&hit.path],|r|r.get(0))?;
+        if hit.path.starts_with("good-search://gmail/") { hit.gmail = gmail::metadata(db, &hit.path)?; }
         if !hit.slack && !hit.path.starts_with("good-search://gmail/") { hit.jira = jira::metadata(db, &hit.path)?; }
     }
     Ok(())
@@ -254,7 +256,7 @@ pub fn search_filtered(
     let rows = stmt.query_map(rusqlite::params_from_iter(values), |r| {
         Ok(Hit {
             original_url: None,
-            jira: None, timestamp: None, slack: false,
+            jira: None, gmail: None, timestamp: None, slack: false,
             path: r.get(0)?,
             name: r.get(1)?,
             snippet: None,

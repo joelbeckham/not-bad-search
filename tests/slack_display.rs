@@ -12,7 +12,7 @@ fn cached_titles_previews_and_attachments_use_source_name() {
  let mut source=Source::slack_source();source.id="source".into();source.name="engineering-updates".into();
  let settings=source.slack.as_mut().unwrap();settings.channel="C12345678".into();settings.workspace="https://example.slack.com".into();
  let sources=vec![source];
- let mut hit=Hit{path:"good-search://slack/source/C12345678/123.456789".into(),name:"C12345678 · :date: Coming up".into(),snippet:Some(":e-mail: Engage".into()),original_url:Some("https://example.slack.com/archives/C12345678/p123456789".into()),jira:None,slack:true,timestamp:None};
+ let mut hit=Hit{path:"good-search://slack/source/C12345678/123.456789".into(),name:"C12345678 · :date: Coming up".into(),snippet:Some(":e-mail: Engage".into()),original_url:Some("https://example.slack.com/archives/C12345678/p123456789".into()),jira:None,gmail:None,slack:true,timestamp:None};
  display::decorate(&mut hit,&sources);
  assert_eq!(hit.name,"#engineering-updates · 📅 Coming up");assert_eq!(hit.snippet.as_deref(),Some("📧 Engage"));
  assert_eq!(display::preview("C12345678\nFrom: Author\n:date: Coming up",Some("#engineering-updates")),"#engineering-updates\nFrom: Author\n📅 Coming up");

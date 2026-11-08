@@ -1,6 +1,6 @@
 use anyhow::Result;
 use good_search::{Hit,SearchFilters,sorting::{self,SortMode}};
-fn hit(path:&str,timestamp:Option<i64>)->Hit { Hit{path:path.into(),name:path.into(),timestamp,original_url:None,jira:None,slack:false,snippet:None} }
+fn hit(path:&str,timestamp:Option<i64>)->Hit { Hit{path:path.into(),name:path.into(),timestamp,original_url:None,jira:None,gmail:None,slack:false,snippet:None} }
 #[test]
 fn dates_and_modest_boost_are_deterministic() {
  let now=1800000000;

@@ -80,6 +80,21 @@ pub fn sync(
         [source],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
     )?;
+    if cancel() {
+        return Ok(Outcome::Cancelled);
+    }
+    let label_response = p.read("list_labels", json!({}))?;
+    let mut label_names = serde_json::Map::new();
+    for label in label_response["labels"]
+        .as_array()
+        .context("Gmail omitted labels")?
+    {
+        if label["labelType"] == "USER" {
+            if let (Some(id), Some(name)) = (label["labelId"].as_str(), label["name"].as_str()) {
+                label_names.insert(id.into(), json!(name));
+            }
+        }
+    }
     let mut seen = std::collections::HashSet::new();
     if let Some(c) = &cursor {
         seen.insert(c.clone());
@@ -119,11 +134,12 @@ pub fn sync(
                 return Ok(Outcome::Cancelled);
             }
             let id = t["id"].as_str().context("Gmail omitted thread ID")?;
-            let thread = p.read(
+            let mut thread = p.read(
                 "get_thread",
                 json!({"threadId":id,"messageFormat":"PLAIN_TEXT"}),
             )?;
             ensure!(thread["id"] == id, "Gmail returned the wrong conversation");
+            thread["labelNames"] = json!(label_names);
             fetched.push(thread);
         }
         if cancel() {
@@ -247,4 +263,79 @@ fn publish(db: &Connection, source: &str, run: &str, scope: &str, t: &Value) -> 
         db.execute("INSERT INTO chunks(document_id,ordinal,heading,start_line,body,content_hash) VALUES(?1,?2,?3,?4,?5,?6)",params![doc,i as i64,c.heading,c.line as i64,c.body,blake3::hash(c.body.as_bytes()).to_hex().to_string()])?;
     }
     Ok(())
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Metadata {
+    pub from: String,
+    pub date: String,
+    pub labels: Vec<String>,
+    pub messages: usize,
+}
+impl Metadata {
+    pub fn from_thread(t: &Value) -> Self {
+        let messages = t["messages"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+        let latest = messages.iter().max_by_key(|m| {
+            m["date"]
+                .as_str()
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|d| d.timestamp())
+        });
+        let Some(m) = latest else {
+            return Self::default();
+        };
+        let address = m["sender"].as_str().unwrap_or("");
+        let name = m["addressDisplayNames"]
+            .as_array()
+            .and_then(|a| a.iter().find(|v| v["emailAddress"] == address))
+            .and_then(|v| v["displayName"].as_str())
+            .filter(|s| !s.is_empty());
+        let from = name
+            .map(|n| format!("{n} <{address}>"))
+            .unwrap_or_else(|| address.into());
+        let mut labels = Vec::new();
+        for message in messages {
+            for id in message["labelIds"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                let label = t["labelNames"][id]
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| match id {
+                        "INBOX" => "Inbox".into(),
+                        "UNREAD" => "Unread".into(),
+                        "STARRED" => "Starred".into(),
+                        "IMPORTANT" => "Important".into(),
+                        "SENT" => "Sent".into(),
+                        "DRAFT" => "Draft".into(),
+                        "TRASH" => "Trash".into(),
+                        "SPAM" => "Spam".into(),
+                        _ if id.starts_with("CATEGORY_") => {
+                            let s = id.trim_start_matches("CATEGORY_").to_lowercase();
+                            format!("{}{}", s[..1].to_uppercase(), &s[1..])
+                        }
+                        _ => String::new(),
+                    });
+                if !label.is_empty() && !labels.contains(&label) {
+                    labels.push(label);
+                }
+            }
+        }
+        labels.sort();
+        Self {
+            from,
+            date: m["date"].as_str().unwrap_or("").into(),
+            labels,
+            messages: messages.len(),
+        }
+    }
+}
+pub fn metadata(db: &Connection, path: &str) -> Result<Option<Metadata>> {
+    let raw:Option<String>=db.query_row("SELECT raw_content FROM remote_items r JOIN files f ON f.id=r.file_id WHERE f.path=?1 AND r.content_format='gmail'",[path],|r|r.get(0)).optional()?;
+    Ok(raw
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .map(|t| Metadata::from_thread(&t)))
 }

@@ -173,6 +173,7 @@ impl App {
         )
         .on_hover_text(hit.location());
         jira_summary(ui, hit, true);
+        gmail_summary(ui, hit, true);
         if let Some(info) = &hit.jira {
             ui.horizontal_wrapped(|ui| {
                 for (label, value) in [("Assignee", &info.assignee), ("Type", &info.issue_type), ("Priority", &info.priority), ("Project", &info.project)] {
@@ -387,4 +388,15 @@ pub(super) fn jira_summary(ui: &mut egui::Ui, hit: &Hit, expanded: bool) {
         let date = if expanded { full_date(&info.updated) } else { relative_date(&info.updated) };
         ui.add(egui::Label::new(RichText::new(format!("Updated {date}")).small().weak()).truncate()).on_hover_text(full_date(&info.updated));
     });
+}
+
+pub(super) fn gmail_summary(ui:&mut egui::Ui,hit:&Hit,expanded:bool) {
+    let Some(info)=&hit.gmail else{return};
+    let date=chrono::DateTime::parse_from_rfc3339(&info.date).ok().map(|d|d.with_timezone(&chrono::Local).format("%b %d, %Y %H:%M").to_string()).unwrap_or_else(||info.date.clone());
+    let mut parts=vec![format!("From: {}",info.from),format!("Latest: {date}")];
+    if !info.labels.is_empty(){parts.push(format!("Labels: {}",info.labels.join(", ")));}
+    if info.messages>1{parts.push(format!("{} messages",info.messages));}
+    let line=parts.join(" · ");
+    let label=egui::Label::new(RichText::new(&line).small().weak());
+    if expanded {ui.add(label.wrap());} else {ui.add(label.truncate()).on_hover_text(&line);}
 }

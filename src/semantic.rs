@@ -214,7 +214,7 @@ impl VectorIndex {
                     };
                     hits.push(Hit {
                         original_url: None,
-                        jira: None, timestamp: None, slack: false,
+                        jira: None, gmail: None, timestamp: None, slack: false,
                         path,
                         name,
                         snippet: Some(format!(

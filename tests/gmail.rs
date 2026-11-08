@@ -8,6 +8,9 @@ use std::collections::VecDeque;
 struct Fake(VecDeque<(&'static str, Value)>);
 impl Provider for Fake {
     fn read(&mut self, tool: &str, args: Value) -> Result<Value> {
+        if tool == "list_labels" {
+            return Ok(json!({"labels":[]}));
+        }
         if tool == "search_threads" {
             assert!(args["query"].as_str().unwrap().contains("after:"));
         }
@@ -106,4 +109,20 @@ fn new_source_is_paused_and_config_roundtrips() -> Result<()> {
     let restored: good_search::sources::Source = toml::from_str(&encoded)?;
     assert_eq!(source.root(), restored.root());
     Ok(())
+}
+
+#[test]
+fn details_choose_latest_message_and_resolve_labels() {
+    let thread = json!({"labelNames":{"Label_123":"Engineering"},"messages":[
+        {"sender":"new@example.com","date":"2026-11-08T12:00:00Z","addressDisplayNames":[{"emailAddress":"new@example.com","displayName":"New Sender"}],"labelIds":["INBOX","UNREAD","Label_123"]},
+        {"sender":"old@example.com","date":"2026-11-01T12:00:00Z","labelIds":["INBOX","CATEGORY_UPDATES"]}
+    ]});
+    let info = gmail::Metadata::from_thread(&thread);
+    assert_eq!(info.from, "New Sender <new@example.com>");
+    assert_eq!(info.date, "2026-11-08T12:00:00Z");
+    assert_eq!(
+        info.labels,
+        vec!["Engineering", "Inbox", "Unread", "Updates"]
+    );
+    assert_eq!(info.messages, 2);
 }
