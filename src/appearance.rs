@@ -136,7 +136,22 @@ impl App {
                     };
                     let show_settings_key =
                         !self.settings && self.inspector.is_none() && self.preview.is_none();
-                    if ui
+                    if self.settings {
+                        let response = ui.add(egui::Button::new("").min_size(Vec2::new(28., 28.)).frame(false))
+                            .on_hover_text("Shut down Good Search");
+                        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Shut down Good Search"));
+                        let center = response.rect.center();
+                        let stroke = egui::Stroke::new(1.7, MUTED);
+                        ui.painter().line_segment([center + Vec2::new(-5., -5.), center + Vec2::new(5., 5.)], stroke);
+                        ui.painter().line_segment([center + Vec2::new(-5., 5.), center + Vec2::new(5., -5.)], stroke);
+                        let text_response = ui.add(
+                            egui::Button::new(RichText::new("Shut down Good Search").size(12.).color(MUTED))
+                                .frame(false),
+                        );
+                        if response.clicked() || text_response.clicked() {
+                            std::process::exit(0);
+                        }
+                    } else if ui
                         .add(
                             egui::Button::new(RichText::new(label).size(13.).color(MUTED))
                                 .frame(false),
@@ -169,17 +184,6 @@ impl App {
                                 "Back to search"
                             };
                             ui.label(RichText::new(back_label).size(12.).color(MUTED));
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        RichText::new("Quit Good Search").size(12.).color(MUTED),
-                                    )
-                                    .frame(false),
-                                )
-                                .clicked()
-                            {
-                                std::process::exit(0);
-                            }
                             ui.label(
                                 RichText::new("Ctrl + Alt + Space to summon")
                                     .size(11.)

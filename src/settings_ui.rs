@@ -238,10 +238,19 @@ impl App {
         });
         ui.separator();
         ui.horizontal(|ui| {
-            if self.source_settings.selected.is_some() && action_icon(ui, false).clicked() {
-                self.source_settings.selected = None;
+            let back_label = if self.source_settings.selected.is_some() {
+                "Back to sources"
+            } else if self.inspector.is_some() {
+                "Back to indexed data"
+            } else if self.preview.is_some() {
+                "Back to preview"
+            } else {
+                "Back to search"
+            };
+            if action_icon(ui, false, back_label).clicked() {
+                self.back();
             }
-            if action_icon(ui, true).clicked() {
+            if action_icon(ui, true, "Save changes").clicked() {
                 match self.save() {
                     Ok(()) => {
                         self.source_settings.checked = None;
@@ -554,12 +563,7 @@ impl App {
         ui.label(&self.image_status);
     }
 }
-fn action_icon(ui: &mut egui::Ui, save: bool) -> egui::Response {
-    let label = if save {
-        "Save changes"
-    } else {
-        "Back to sources"
-    };
+fn action_icon(ui: &mut egui::Ui, save: bool, label: &str) -> egui::Response {
     let response = ui
         .add(egui::Button::new("").min_size(egui::vec2(32., 28.)))
         .on_hover_text(label);
