@@ -214,6 +214,7 @@ impl VectorIndex {
                     };
                     hits.push(Hit {
                         original_url: None,
+                        jira: None,
                         path,
                         name,
                         snippet: Some(format!(

@@ -7,7 +7,7 @@ fn main() -> Result<()> {
     if args.get(1).is_some_and(|s| s == "status") {
         let path = std::path::Path::new(args.get(2).context("Data directory required")?);
         let db = good_search::open_reader(&path.join("index.sqlite"))?;
-        let mut statement=db.prepare("SELECT r.issue_key,r.remote_updated,r.synced_at,length(r.raw_adf),(SELECT count(*) FROM chunks c JOIN documents d ON d.id=c.document_id WHERE d.file_id=r.file_id),(SELECT count(*) FROM embeddings e JOIN chunks c ON c.id=e.chunk_id JOIN documents d ON d.id=c.document_id WHERE d.file_id=r.file_id) FROM remote_items r ORDER BY r.issue_key")?;
+        let mut statement=db.prepare("SELECT r.issue_key,r.remote_updated,r.synced_at,length(r.raw_content),(SELECT count(*) FROM chunks c JOIN documents d ON d.id=c.document_id WHERE d.file_id=r.file_id),(SELECT count(*) FROM embeddings e JOIN chunks c ON c.id=e.chunk_id JOIN documents d ON d.id=c.document_id WHERE d.file_id=r.file_id) FROM remote_items r ORDER BY r.issue_key")?;
         for row in statement.query_map([], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -157,7 +157,167 @@ fn main() -> Result<()> {
         }
         anyhow::bail!("Could not resolve an MCP endpoint on the supplied origin");
     }
-    let mut m = Mcp::connect(Connection::load()?)?;
+    let mut m = Mcp::connect_discovery(Connection::load()?)?;
+    if args.get(1).is_some_and(|s|s=="format-probe") {
+        let page=m.call("jira_searchJiraIssuesUsingJql",json!({"cloudId":"bombbomb.atlassian.net","jql":"project = CORE ORDER BY updated ASC","maxResults":50,"fields":["id","key","summary","description","updated"],"searchResultMode":"issues","view":"full","responseContentFormat":"markdown"}))?;
+        println!("Page format {}",page["appliedContentFormat"]);
+        for key in ["CORE-6","CORE-7"] {
+            use good_search::jira::Provider;
+            let value=m.issue(&Default::default(),key)?;
+            println!("Detail {key}: format={}, description_null={}",value["appliedContentFormat"],value["fields"]["description"].is_null());
+        }
+        for issue in page["issues"].as_array().context("Missing issues")? {
+            println!("{} issue-format={} field-format={} field-keys={:?}",issue["key"],issue["appliedContentFormat"],issue["fields"]["appliedContentFormat"],issue["fields"].as_object().map(|o|o.keys().collect::<Vec<_>>()));
+        }
+        return Ok(());
+    }
+    if args.get(1).is_some_and(|s| s == "attachment-test") {
+        let path=std::path::Path::new(args.get(2).context("Fixture directory required")?);
+        std::fs::create_dir_all(path)?;
+        let mut db=good_search::open_db(&path.join("index.sqlite"))?;
+        let mut source=good_search::sources::Source::jira_source();source.id="attachment-test".into();source.paused=false;
+        let settings=source.jira.as_mut().unwrap();settings.jql="key in (CORE-11116, CORE-11112)".into();settings.page_size=1;
+        println!("Sync: {:?}",good_search::jira::sync(&mut db,&source.id,settings,&mut m,||false)?);
+        good_search::attachments::sync_jira(&mut db,&source.id,settings,&mut m,&path.join("attachments"),||false)?;
+        let config=good_search::Config{sources:vec![source],semantic_enabled:false,..Default::default()};
+        std::fs::write(path.join("config.toml"),toml::to_string_pretty(&config)?)?;
+        good_search::images::discover(&mut db,&config)?;
+        if args.get(3).is_some_and(|s|s=="analyze") {
+            let extractor=good_search::images::OpenAi::new()?;
+            for _ in 0..2 {good_search::images::process_one(&mut db,&extractor,||config.clone())?;}
+        }
+        println!("Images: {}",good_search::images::summary(&db)?);
+        let mut formats=db.prepare("SELECT content_format,count(*) FROM remote_items GROUP BY content_format")?;
+        for row in formats.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?)))? {println!("Stored format: {:?}",row?);}
+        return Ok(());
+    }
+    if args.get(1).is_some_and(|s| s == "discovery") {
+        for name in m.discovered_tools() {
+            if name.starts_with("jira-") || name.starts_with("jira_v2") {
+                println!("{name}");
+            }
+        }
+        return Ok(());
+    }
+    if args.get(1).is_some_and(|s| s == "v2-catalog") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&m.v2_catalog()["jira_v2-downloadJiraIssueAttachment"])?
+        );
+        return Ok(());
+    }
+    if args.get(1).is_some_and(|s| s == "v2-download-probe") {
+        let result = m.probe_v2_download(
+            json!({"cloudId":"bombbomb.atlassian.net","attachmentId":"76578"}),
+        )?;
+        println!(
+            "Response fields: {:?}",
+            result.as_object().map(|o| o.keys().collect::<Vec<_>>())
+        );
+        fn urls(value: &serde_json::Value, found: &mut Vec<String>) {
+            match value {
+                serde_json::Value::String(s)
+                    if s.starts_with("https://") && !s.contains(char::is_whitespace) =>
+                {
+                    found.push(s.clone())
+                }
+                serde_json::Value::Object(o) => {
+                    for v in o.values() {
+                        urls(v, found);
+                    }
+                }
+                serde_json::Value::Array(a) => {
+                    for v in a {
+                        urls(v, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        urls(&result, &mut found);
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(20))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?;
+        for url in found {
+            let parsed = reqwest::Url::parse(&url)?;
+            let host = parsed.host_str().unwrap_or("");
+            if !(host.ends_with(".atlassian.com")
+                || host.ends_with(".atl-paas.net")
+                || host.ends_with(".atlassian.net"))
+            {
+                println!("Skipped unrecognized download host {host}");
+                continue;
+            }
+            let response = client
+                .get(url)
+                .send()
+                .map_err(|_| anyhow::anyhow!("Download request failed"))?;
+            println!(
+                "Download host={host} HTTP={} type={:?}",
+                response.status().as_u16(),
+                response.headers().get("content-type")
+            );
+            if response.status().is_success() {
+                use std::io::Read;
+                let mut bytes = Vec::new();
+                response.take(1024 * 1024).read_to_end(&mut bytes)?;
+                println!(
+                    "Received {} bytes; PNG signature={}",
+                    bytes.len(),
+                    bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+                );
+            }
+        }
+        return Ok(());
+    }
+    if args.get(1).is_some_and(|s| s == "image-probe") {
+        let result = m.call("jira_searchJiraIssuesUsingJql", json!({
+            "cloudId":"bombbomb.atlassian.net", "jql":"project = CORE AND attachments IS NOT EMPTY ORDER BY updated DESC",
+            "maxResults":2,"fields":["attachment"],"searchResultMode":"issues"
+        }))?;
+        for issue in result["issues"].as_array().context("Missing issues")? {
+            println!("Issue {}", issue["key"]);
+            for attachment in issue["fields"]["attachment"]
+                .as_array()
+                .into_iter()
+                .flatten()
+            {
+                if !attachment["mimeType"]
+                    .as_str()
+                    .unwrap_or("")
+                    .starts_with("image/")
+                {
+                    continue;
+                }
+                let url = attachment["content"]
+                    .as_str()
+                    .context("Missing download URL")?;
+                let parsed = reqwest::Url::parse(url)?;
+                println!(
+                    "Image id={} type={} size={} download_host={:?}",
+                    attachment["id"],
+                    attachment["mimeType"],
+                    attachment["size"],
+                    parsed.host_str()
+                );
+                // No gateway credentials are ever sent to attachment hosts.
+                let response = reqwest::blocking::Client::builder()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .timeout(std::time::Duration::from_secs(15))
+                    .build()?
+                    .get(url)
+                    .send()
+                    .map_err(|_| anyhow::anyhow!("Attachment request failed"))?;
+                println!(
+                    "Unauthenticated download HTTP {}",
+                    response.status().as_u16()
+                );
+            }
+        }
+        return Ok(());
+    }
     if args.get(1).is_some_and(|s| s == "catalog") {
         println!("{}", serde_json::to_string_pretty(&m.catalog())?);
         return Ok(());

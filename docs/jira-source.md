@@ -8,7 +8,7 @@ Good Search uses a deterministic MCP client for background imports. Searches, pr
 2. In Sources, choose **Add Jira**. Defaults are site `https://bombbomb.atlassian.net`, cloud ID `bombbomb.atlassian.net`, and project `CORE` (project ID 10006). Start with a JQL expression such as `key in (CORE-123, CORE-456)` using real issue keys. Page size is a pagination setting, not an import limit.
 3. New sources start paused. Set the JQL, uncheck pause and save. Use **Sync enabled Jira sources now** for manual refresh; this operates on saved settings. Default background polling is five minutes.
 
-The source's project condition is always combined with the JQL. User ordering is replaced with updated ascending. Only summaries and descriptions are imported; comments and attachment contents are excluded.
+The source's project condition is always combined with the JQL. User ordering is replaced with updated ascending. Summaries, descriptions and supported image attachments are imported. Comments and non-image attachment contents are excluded.
 
 ## Protocol and security
 
@@ -20,11 +20,11 @@ Requests use Bearer authentication. HTTPS is required except loopback HTTP for s
 
 Schema 4 adds remote_items, remote_sync and remote_failures. A remote item has a stable internal URI backed by a files row so existing FTS, chunks and vectors can be reused. Remote URIs are excluded from filesystem scanning and extraction. Visible locations and opening use the original HTTPS Jira URL.
 
-Search requests ask for ADF if tool discovery advertises responseContentFormat. String descriptions for changed issues trigger an individual getJiraIssue with ADF and updateHistory=false. Raw ADF is stored alongside converted text. Conversion preserves paragraph, heading, list, table-row and code boundaries, hard breaks and link destinations. Unsupported nodes such as media produce visible markers and warnings; attachment bytes are never fetched. Plain-text fallback is visibly flagged. Depth, node-count and converted-text limits fail rather than silently truncating content.
+Jira v2 search and detail requests prefer Markdown and request the full view. When Jira returns HTML, appliedContentFormat selects a standard HTML parser that preserves readable structure and link destinations. Raw content and its actual format are retained. Markdown is indexed directly. Legacy ADF remains readable during migration. Descriptions exceeding 2 MiB fail without publishing partial text.
 
 Network and conversion occur outside SQLite write transactions. Each complete page publishes its items and continuation token atomically. Duplicate content preserves chunk/vector identities; changed content atomically replaces chunks, cascading old vectors, then queues local embedding regeneration. A run checkpoint advances only after the last page succeeds. Timestamps normalize to UTC; incremental JQL uses a date-only lower bound at least 48 hours before the checkpoint to overlap Jira timezone boundaries. Resuming uses the saved fixed JQL and page token. After repeated failures, a run restarts from its last completed checkpoint to recover from expired tokens. Retries back off from 30 seconds to one hour. Work yields after 50 pages per worker pass.
 
-Pausing/removing a source or changing its saved scope cancels publication at request/page boundaries. An in-flight request can take up to its timeout. Source removal explicitly removes its local records. Missing search results **never** delete indexed issues. Scope changes retain prior items and flag those not confirmed in the new scope. Source status exposes last successful sync, pending progress, errors, unresolved issues, content warnings and embedding counts. Inspect indexed data exposes raw ADF, per-item sync timestamps and failures.
+Pausing/removing a source or changing its saved scope cancels publication at request/page boundaries. An in-flight request can take up to its timeout. Source removal explicitly removes its local records. Missing search results **never** delete indexed issues. Scope changes retain prior items and flag those not confirmed in the new scope. Source status exposes last successful sync, pending progress, errors, unresolved issues, content warnings and embedding counts. Inspect indexed data exposes raw content and its format, per-item sync timestamps and failures.
 
 ## Limits and validation
 
@@ -43,3 +43,19 @@ Native release checks passed for search, Enter preview, Up/Down preview navigati
 Synthetic tests cover large descriptions and ADF tables/media warnings. Live ADF table/media behavior, deletion/access-change feeds and complete error classification remain unverified.
 
 Installed the release after backing up the normal data directory and executable. Existing folder settings were preserved and the pinned two-key Jira source enabled. The normal app imported both issues and generated all three vectors without warnings or unresolved failures. Its global hotkey showed/focused the window in 30–48 ms over three trials; empty-search Escape hid it. A ten-second hidden sample measured 0.469% of one CPU core and 134.8 MiB working set with the existing index/model loaded. All 36 automated tests and Clippy with warnings denied passed. Changes remain uncommitted.
+
+## Image attachments
+
+The ordinary `jira_v2-downloadJiraIssueAttachment` tool supplies short-lived URLs; gateway credentials are never forwarded to download hosts. The v2 ordinary-account tools take precedence for search and issue detail.
+
+Supported attachments are PNG, JPEG and WebP, up to 10 MiB and 20 megapixels. Downloads are bounded, cancellable between requests, and occur outside SQLite transactions. A source error triggers existing sync retry/backoff. Missing attachments are retained conservatively. Manual sync rescans parent attachments; unchanged hashes preserve chunks and vectors. Changed bytes replace derived content.
+
+Images are cached under the data directory's `attachments` folder, analyzed through the configured OpenAI model and existing daily budget, then indexed locally. Source pause and global image-processing pause are respected. Each image is its own Image result with a thumbnail; preview uses cached bytes and Enter opens the parent Jira ticket. The inspector includes attachment metadata and the parent relationship. Search and preview require no network calls.
+
+## Reloading existing tickets
+
+The schema upgrade schedules one full refresh for each source. Paused sources wait until resumed. Use Reload all tickets on next save, then Save changes, to repeat a full refresh of the saved JQL scope. It retains the last usable local snapshot, replaces refreshed content atomically, and does not delete issues missing from the query. The normal Sync enabled Jira sources now button remains incremental.
+
+Mixed-format search pages are resolved per issue. Ambiguous descriptions use a detail request (Markdown preferred, HTML if that detail is still mixed). The full v2 response omits empty descriptions; those are normalized to empty content. Page checkpoints advance only after all descriptions are resolved.
+
+Results show the exact status with a category icon and a relative Jira updated date (hover for the full local timestamp). Previews include status, updated time, assignee, issue type, priority, and project, with created time, reporter, labels, and sync time under Ticket details. Attachment metadata is labeled as belonging to the parent ticket. Missing optional fields are omitted or shown as unavailable. Schema v7 stores metadata separately from searchable content; upgrading triggers a scope refresh and metadata-only changes preserve chunks and embeddings.

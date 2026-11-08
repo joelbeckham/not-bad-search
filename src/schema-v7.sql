@@ -1,0 +1,1 @@
+ALTER TABLE remote_items ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}';

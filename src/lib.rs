@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -134,6 +134,7 @@ impl Config {
 #[derive(Clone, Debug)]
 pub struct Hit {
     pub original_url: Option<String>,
+    pub jira: Option<jira::Metadata>,
     pub path: String,
     pub name: String,
     pub snippet: Option<String>,
@@ -150,10 +151,17 @@ pub(crate) fn remote_locations(db: &Connection, hits: &mut [Hit]) -> Result<()> 
     {
         hit.original_url=Some(db.query_row("SELECT original_url FROM remote_items r JOIN files f ON f.id=r.file_id WHERE f.path=?1",[&hit.path],|r|r.get(0))?);
     }
+    for hit in hits.iter_mut().filter(|h| h.original_url.is_none()) {
+        hit.original_url=db.query_row("SELECT r.original_url FROM attachments a JOIN remote_items r ON r.file_id=a.parent_file_id JOIN files f ON f.id=a.file_id WHERE f.path=?1",[&hit.path],|r|r.get(0)).optional()?;
+    }
+    for hit in hits.iter_mut().filter(|h| h.original_url.is_some()) {
+        hit.jira = jira::metadata(db, &hit.path)?;
+    }
     Ok(())
 }
 
 pub mod filters;
+pub mod attachments;
 pub use filters::SearchFilters;
 pub fn search(db: &Connection, query: &str, limit: usize) -> Result<Vec<Hit>> {
     search_filtered(db, query, limit, SearchFilters::default())
@@ -205,7 +213,7 @@ pub fn search_filtered(
     filters.push(format!(
         "(?{root_param}='null' OR f.root IN (SELECT value FROM json_each(?{root_param})))"
     ));
-    let image = "(f.path NOT LIKE 'good-search://jira/%' AND (EXISTS(SELECT 1 FROM documents d WHERE d.file_id=f.id AND d.kind IN ('image_text','image_description')) OR lower(f.name) GLOB '*.png' OR lower(f.name) GLOB '*.jpg' OR lower(f.name) GLOB '*.jpeg' OR lower(f.name) GLOB '*.webp' OR lower(f.name) GLOB '*.gif' OR lower(f.name) GLOB '*.bmp' OR lower(f.name) GLOB '*.tif' OR lower(f.name) GLOB '*.tiff' OR lower(f.name) GLOB '*.svg' OR lower(f.name) GLOB '*.avif'))";
+    let image = "(f.path NOT LIKE 'good-search://jira/%' AND (EXISTS(SELECT 1 FROM attachments a WHERE a.file_id=f.id) OR EXISTS(SELECT 1 FROM documents d WHERE d.file_id=f.id AND d.kind IN ('image_text','image_description')) OR lower(f.name) GLOB '*.png' OR lower(f.name) GLOB '*.jpg' OR lower(f.name) GLOB '*.jpeg' OR lower(f.name) GLOB '*.webp' OR lower(f.name) GLOB '*.gif' OR lower(f.name) GLOB '*.bmp' OR lower(f.name) GLOB '*.tif' OR lower(f.name) GLOB '*.tiff' OR lower(f.name) GLOB '*.svg' OR lower(f.name) GLOB '*.avif'))";
     if !options.images {
         filters.push(format!("NOT {image}"));
     }
@@ -230,6 +238,7 @@ pub fn search_filtered(
     let rows = stmt.query_map(rusqlite::params_from_iter(values), |r| {
         Ok(Hit {
             original_url: None,
+            jira: None,
             path: r.get(0)?,
             name: r.get(1)?,
             snippet: None,
@@ -268,7 +277,7 @@ pub fn reconcile(db: &mut Connection, config: &Config) -> Result<Vec<String>> {
         )?;
     }
     tx.execute(
-        "DELETE FROM files WHERE root NOT IN (SELECT path FROM roots) AND id NOT IN (SELECT file_id FROM remote_items)",
+        "DELETE FROM files WHERE root NOT IN (SELECT path FROM roots) AND id NOT IN (SELECT file_id FROM remote_items) AND id NOT IN (SELECT file_id FROM attachments)",
         [],
     )?;
     tx.commit()?;

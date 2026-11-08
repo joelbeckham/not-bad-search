@@ -21,7 +21,9 @@ pub(super) fn start(
         let run = || -> anyhow::Result<()> {
             crate::platform::background_priority()?;
             let mut db = good_search::open_writer(&path)?;
+            db.execute("UPDATE remote_sync SET retry_at=0,failures=0 WHERE error LIKE '%Unsupported Jira description format: mixed%'",[])?;
             let mut manual = false;
+            let mut last_cache_cleanup=std::time::Instant::now();
             loop {
                 let current = config.lock().unwrap().clone();
                 let ids: Vec<_> = current
@@ -34,6 +36,10 @@ pub(super) fn start(
                 db.execute("DELETE FROM files WHERE id IN (SELECT file_id FROM remote_items WHERE source_id NOT IN (SELECT value FROM json_each(?1)))",[serde_json::to_string(&ids)?])?;
                 db.execute("DELETE FROM remote_sync WHERE source_id NOT IN (SELECT value FROM json_each(?1))",[serde_json::to_string(&ids)?])?;
                 db.execute("DELETE FROM remote_failures WHERE source_id NOT IN (SELECT value FROM json_each(?1))",[serde_json::to_string(&ids)?])?;
+                if last_cache_cleanup.elapsed()>=Duration::from_secs(3600) {
+                    good_search::attachments::prune_cache(&db,&path.parent().unwrap().join("attachments"))?;
+                    last_cache_cleanup=std::time::Instant::now();
+                }
                 for source in current
                     .sources
                     .iter()
@@ -73,7 +79,15 @@ pub(super) fn start(
                     };
                     let result = (|| -> anyhow::Result<Outcome> {
                         let mut client = Mcp::connect(Connection::load()?)?;
-                        jira::sync(&mut db, &source.id, settings, &mut client, cancel)
+                        if manual {
+                            db.execute("DELETE FROM attachment_scans WHERE parent_file_id IN (SELECT file_id FROM remote_items WHERE source_id=?1)",[&source.id])?;
+                        }
+                        let outcome=jira::sync(&mut db, &source.id, settings, &mut client, cancel)?;
+                        if !cancel() {
+                            good_search::attachments::sync_jira(&mut db,&source.id,settings,&mut client,&path.parent().unwrap().join("attachments"),cancel)?;
+                            good_search::images::discover(&mut db,&config.lock().unwrap().clone())?;
+                        }
+                        Ok(outcome)
                     })();
                     let message = match result {
                         Ok(Outcome::Complete) => format!("{}: sync complete", source.name),

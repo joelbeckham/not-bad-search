@@ -24,7 +24,7 @@ pub fn open_reader(path: &Path) -> Result<Connection> {
 pub fn open_db(path: &Path) -> Result<Connection> {
     let mut db = open_writer(path)?;
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version > 4 {
+    if version > 7 {
         bail!("Index schema {version} is newer than this application supports");
     }
     db.execute_batch("PRAGMA journal_mode=WAL;")?;
@@ -64,6 +64,24 @@ pub fn open_db(path: &Path) -> Result<Connection> {
         let tx = db.transaction()?;
         tx.execute_batch(include_str!("schema-v4.sql"))?;
         tx.pragma_update(None, "user_version", 4)?;
+        tx.commit()?;
+    }
+    if version < 5 {
+        let tx = db.transaction()?;
+        tx.execute_batch(include_str!("schema-v5.sql"))?;
+        tx.pragma_update(None, "user_version", 5)?;
+        tx.commit()?;
+    }
+    if version < 6 {
+        let tx=db.transaction()?;
+        tx.execute_batch(include_str!("schema-v6.sql"))?;
+        tx.pragma_update(None,"user_version",6)?;
+        tx.commit()?;
+    }
+    if version < 7 {
+        let tx = db.transaction()?;
+        tx.execute_batch(include_str!("schema-v7.sql"))?;
+        tx.pragma_update(None, "user_version", 7)?;
         tx.commit()?;
     }
     Ok(db)

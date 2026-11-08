@@ -60,7 +60,8 @@ pub fn inspect(db: &mut Connection, path: &str) -> Result<Value> {
     let remote = rows(&tx, "SELECT * FROM remote_items WHERE file_id=?1", id)?;
     let sync = rows(&tx,"SELECT s.* FROM remote_sync s JOIN remote_items r ON r.source_id=s.source_id WHERE r.file_id=?1",id)?;
     let failures = rows(&tx,"SELECT e.* FROM remote_failures e JOIN remote_items r ON r.source_id=e.source_id AND r.site=e.site AND r.remote_id=e.remote_id WHERE r.file_id=?1",id)?;
-    let value = serde_json::json!({"file":file,"remote_item":remote,"sync":sync,"remote_failures":failures,"documents":documents,"image_jobs":jobs,"image_cache":cache});
+    let attachments=rows(&tx,"SELECT a.*,r.title AS parent_title,r.original_url AS parent_url FROM attachments a JOIN remote_items r ON r.file_id=a.parent_file_id WHERE a.file_id=?1",id)?;
+    let value = serde_json::json!({"file":file,"attachments":attachments,"remote_item":remote,"sync":sync,"remote_failures":failures,"documents":documents,"image_jobs":jobs,"image_cache":cache});
     tx.commit()?;
     Ok(value)
 }

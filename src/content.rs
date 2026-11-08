@@ -195,6 +195,7 @@ pub(crate) fn search_content(
             };
             hits.push(Hit {
                 original_url: None,
+                jira: None,
                 path,
                 name: row.get(1)?,
                 snippet: Some(format!(

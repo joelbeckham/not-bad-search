@@ -53,6 +53,8 @@ pub struct Mcp {
     protocol: String,
     next_id: u64,
     tools: HashMap<String, (String, Value)>,
+    discovered_tools: Vec<String>,
+    discovered_schemas: HashMap<String, Value>,
 }
 pub fn allowed_name(name: &str) -> Option<&'static str> {
     if name.contains("service_user") {
@@ -89,6 +91,12 @@ pub fn tool_payload(result: Value) -> Result<Value> {
 }
 impl Mcp {
     pub fn connect(connection: Connection) -> Result<Self> {
+        Self::connect_inner(connection, true)
+    }
+    pub fn connect_discovery(connection: Connection) -> Result<Self> {
+        Self::connect_inner(connection, false)
+    }
+    fn connect_inner(connection: Connection, require_sync: bool) -> Result<Self> {
         connection.validate()?;
         let client = Client::builder()
             .timeout(Duration::from_secs(45))
@@ -102,6 +110,8 @@ impl Mcp {
             protocol: "2025-03-26".into(),
             next_id: 1,
             tools: HashMap::new(),
+            discovered_tools: Vec::new(),
+            discovered_schemas: HashMap::new(),
         };
         let result=m.rpc("initialize",json!({"protocolVersion":m.protocol,"capabilities":{},"clientInfo":{"name":"Good Search","version":"0.1.0"}}),false)?;
         m.protocol = result["protocolVersion"]
@@ -117,6 +127,11 @@ impl Mcp {
             let list = m.rpc("tools/list", params, false)?;
             for tool in list["tools"].as_array().context("Invalid MCP tool list")? {
                 let name = tool["name"].as_str().context("Unnamed MCP tool")?;
+                m.discovered_tools.push(name.to_owned());
+                if name.starts_with("jira_v2-") {
+                    m.discovered_schemas
+                        .insert(name.to_owned(), tool["inputSchema"].clone());
+                }
                 if name.to_ascii_lowercase().contains("jira") {
                     jira_names.push(name.to_owned());
                 }
@@ -136,9 +151,16 @@ impl Mcp {
             );
         }
         ensure!(cursor.is_none(), "MCP tool discovery exceeded 100 pages");
+        for canonical in READ_TOOLS {
+            let suffix = canonical.strip_prefix("jira_").unwrap();
+            let name = format!("jira_v2-{suffix}");
+            if let Some(schema) = m.discovered_schemas.get(&name) {
+                m.tools.insert(canonical.into(), (name, schema.clone()));
+            }
+        }
         ensure!(
-            m.tools.contains_key("jira_searchJiraIssuesUsingJql")
-                && m.tools.contains_key("jira_getJiraIssue"),
+            !require_sync || (m.tools.contains_key("jira_searchJiraIssuesUsingJql")
+                && m.tools.contains_key("jira_getJiraIssue")),
             "Ordinary Jira search/detail tools are not available through this connection. Discovered Jira tool names: {}",jira_names.join(", ")
         );
         Ok(m)
@@ -146,10 +168,57 @@ impl Mcp {
     pub fn catalog(&self) -> Value {
         json!(self.tools)
     }
+    /// Discovery only: these names do not grant permission to call a tool.
+    pub fn discovered_tools(&self) -> &[String] {
+        &self.discovered_tools
+    }
+    pub fn v2_catalog(&self) -> Value {
+        json!(self.discovered_schemas)
+    }
+    pub fn probe_v2_download(&mut self, arguments: Value) -> Result<Value> {
+        let name = "jira_v2-downloadJiraIssueAttachment";
+        ensure!(
+            self.discovered_schemas.contains_key(name),
+            "Jira v2 download tool unavailable"
+        );
+        let result = self.rpc(
+            "tools/call",
+            json!({"name":name,"arguments":arguments}),
+            false,
+        )?;
+        if result["isError"].as_bool() == Some(true) {
+            let message = result["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|block| block["text"].as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let safe = message
+                .split_whitespace()
+                .map(|word| {
+                    if word.contains("http") {
+                        "[URL omitted]"
+                    } else {
+                        word
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            bail!(
+                "Jira v2 download tool: {}",
+                safe.chars().take(1500).collect::<String>()
+            );
+        }
+        tool_payload(result)
+    }
     pub fn supports(&self, tool: &str, field: &str) -> bool {
         self.tools
             .get(tool)
             .is_some_and(|(_, schema)| schema["properties"].get(field).is_some())
+    }
+    pub fn supports_adf(&self, tool: &str) -> bool {
+        self.tools.get(tool).is_some_and(|(_,schema)| schema["properties"]["responseContentFormat"]["enum"].as_array().is_none_or(|values| values.iter().any(|v|v=="adf")))
     }
     pub fn call(&mut self, tool: &str, arguments: Value) -> Result<Value> {
         ensure!(
@@ -162,11 +231,16 @@ impl Mcp {
             .context("Required Jira read tool is unavailable")?
             .0
             .clone();
-        tool_payload(self.rpc(
+        let result = tool_payload(self.rpc(
             "tools/call",
             json!({"name":name,"arguments":arguments}),
             false,
-        )?)
+        )?)?;
+        Ok(if name.starts_with("jira_v2-") {
+            result.get("data").cloned().unwrap_or(result)
+        } else {
+            result
+        })
     }
     fn rpc(&mut self, method: &str, params: Value, notification: bool) -> Result<Value> {
         let id = self.next_id;

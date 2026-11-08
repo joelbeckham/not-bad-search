@@ -76,7 +76,11 @@ impl App {
             ui.add(egui::DragValue::new(&mut settings.page_size).range(1..=100));
         });
 
-        ui.label("Indexes summaries and descriptions only. Comments and attachment contents are excluded. Search and previews use the local index, never Jira.");
+        if ui.button("Reload all tickets on next save").on_hover_text("Re-fetch the full saved JQL scope. Existing results remain searchable until refreshed.").clicked() {
+            settings.reload_generation=settings.reload_generation.saturating_add(1);
+        }
+        ui.weak("Reload applies when you save changes. Paused sources reload when resumed.");
+        ui.label("Indexes summaries, Markdown descriptions (HTML when needed), and supported image attachments. Search and previews use the local index.");
         ui.weak("Missing issues are retained: deletion/access-change feeds are unverified. Inspect an issue's local sync time and source freshness before relying on cached content.");
         ui.label(&self.source_settings.remote_status);
         ui.horizontal(|ui| {

@@ -99,7 +99,7 @@ pub fn parse_response(value: &Value) -> Result<Extraction> {
     Ok(extracted)
 }
 
-fn image_bytes(path: &Path) -> Result<(Vec<u8>, &'static str, String)> {
+pub(crate) fn image_bytes(path: &Path) -> Result<(Vec<u8>, &'static str, String)> {
     let file = File::open(path)?;
     if file.metadata()?.len() > MAX_BYTES {
         bail!("Image exceeds 10 MiB");
@@ -125,7 +125,7 @@ fn image_bytes(path: &Path) -> Result<(Vec<u8>, &'static str, String)> {
 }
 
 pub fn discover(db: &mut Connection, config: &Config) -> Result<()> {
-    if config.image_folders.is_empty() {
+    if config.image_folders.is_empty() && !config.sources.iter().any(|s| !s.is_folder()) {
         let tx = db.transaction()?;
         tx.execute_batch("DELETE FROM image_jobs; DELETE FROM documents WHERE kind!='text'; DELETE FROM image_cache;")?;
         tx.commit()?;
@@ -141,7 +141,7 @@ pub fn discover(db: &mut Connection, config: &Config) -> Result<()> {
         if config.source_paused(Path::new(&root)) {
             continue;
         }
-        let eligible = config.image_folders.iter().any(|p| p == Path::new(&root))
+        let eligible = eligible(config, &root)
             && Path::new(&path)
                 .extension()
                 .and_then(|e| e.to_str())
@@ -158,7 +158,7 @@ pub fn discover(db: &mut Connection, config: &Config) -> Result<()> {
             tx.commit()?;
             continue;
         }
-        if !Path::new(&root).is_dir() {
+        if !root.starts_with("jira:") && !Path::new(&root).is_dir() {
             continue;
         }
         let (hash, state, detail) = match image_bytes(Path::new(&path)) {
@@ -217,14 +217,14 @@ pub fn process_one(
     current: impl Fn() -> Config,
 ) -> Result<bool> {
     let config = current();
-    if config.images_paused || config.image_folders.is_empty() {
+    if config.images_paused {
         return Ok(false);
     }
     let job: Option<(i64,String,String,String,String,i64)>=db.query_row("SELECT j.file_id,f.path,f.root,j.source_hash,j.model,j.attempts FROM image_jobs j JOIN files f ON f.id=j.file_id WHERE j.state IN ('pending','failed') AND j.attempts<3 AND j.retry_at<=?1 AND j.model=?2 AND j.version=?3 AND f.root NOT IN (SELECT value FROM json_each(?4)) ORDER BY j.file_id LIMIT 1",params![now(),config.image_model,VERSION,config.paused_roots_json()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).optional()?;
     let Some((id, path, root, hash, model, attempts)) = job else {
         return Ok(false);
     };
-    if !config.image_folders.iter().any(|p| p == Path::new(&root)) {
+    if !eligible(&config, &root) {
         return Ok(false);
     }
     let (bytes, mime, actual) = match image_bytes(Path::new(&path)) {
@@ -249,7 +249,7 @@ pub fn process_one(
         if latest.images_paused
             || latest.source_paused(Path::new(&root))
             || latest.image_model != model
-            || !latest.image_folders.iter().any(|p| p == Path::new(&root))
+            || !eligible(&latest, &root)
         {
             return Ok(false);
         }
@@ -275,10 +275,7 @@ pub fn process_one(
     };
     let latest = current();
     let unchanged = image_bytes(Path::new(&path)).is_ok_and(|(_, _, h)| h == hash);
-    if latest.image_model != model
-        || !latest.image_folders.iter().any(|p| p == Path::new(&root))
-        || !unchanged
-    {
+    if latest.image_model != model || !eligible(&latest, &root) || !unchanged {
         db.execute("UPDATE image_jobs SET state='pending' WHERE file_id=?1 AND source_hash=?2 AND model=?3 AND state='running'",params![id,hash,model])?;
         return Ok(false);
     }
@@ -326,4 +323,12 @@ pub fn process_one(
     )?;
     tx.commit()?;
     Ok(true)
+}
+
+fn eligible(config: &Config, root: &str) -> bool {
+    config.image_folders.iter().any(|p| p == Path::new(root))
+        || config
+            .sources
+            .iter()
+            .any(|s| !s.is_folder() && root == format!("jira:{}", s.id))
 }

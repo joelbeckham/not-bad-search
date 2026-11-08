@@ -6,7 +6,7 @@ Executable definitions: [schema.sql](../src/schema.sql). Migrations and connecti
 
 The Windows-local database is `%LOCALAPPDATA%\GoodSearch\index.sqlite`. `GOOD_SEARCH_DATA` overrides the directory. WSL UNC paths are sources only. Configuration lives in `config.toml` beside the index.
 
-`PRAGMA user_version = 4` identifies this schema. Startup adopts the original unversioned filename index (version 0) and applies numbered transactional migrations, preserving existing rows. Workers start after migration. Newer versions are rejected.
+`PRAGMA user_version = 7` identifies this schema. Startup adopts the original unversioned filename index (version 0) and applies numbered transactional migrations, preserving existing rows. Workers start after migration. Newer versions are rejected.
 
 ## Tables and columns
 
@@ -16,7 +16,7 @@ Executable migration: [schema-v4.sql](../src/schema-v4.sql). Connector behavior:
 
 | Table | Columns and meaning |
 | --- | --- |
-| `remote_items` | `file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE`; `source_id`, `connection_id`, `site`, `remote_id`: source/account/site/stable issue identity; `issue_key`, `title`, `original_url`: display and opening; `remote_updated`, `synced_at`: normalized UTC timestamps; `content_hash`: BLAKE3 of extraction version, key, title and raw ADF; `raw_adf`: original JSON; `searchable_text`: converted title/description; `warnings`: JSON array; `last_seen_run`, `scope_hash`: provenance. All non-key fields are non-null TEXT. Unique `(source_id,site,remote_id)`; index on `source_id`. |
+| `remote_items` | `file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE`; `source_id`, `connection_id`, `site`, `remote_id`: source/account/site/stable issue identity; `issue_key`, `title`, `original_url`: display and opening; `remote_updated`, `synced_at`: normalized UTC timestamps; `content_hash`: BLAKE3 of extraction version, key, title and raw content; `raw_content`: JSON-encoded original description; `content_format`: adf, markdown or html; `searchable_text`: converted title/description; `warnings`: JSON array; `last_seen_run`, `scope_hash`: provenance. All non-key fields are non-null TEXT. Unique `(source_id,site,remote_id)`; index on `source_id`. |
 | `remote_sync` | `source_id TEXT PRIMARY KEY`, `scope_hash TEXT NOT NULL`; nullable TEXT `checkpoint`, `run_id`, `run_jql`, `next_token`, `candidate`, `last_success`, `last_attempt`; `error TEXT NOT NULL DEFAULT ''`; INTEGER NOT NULL DEFAULT 0 `failures`, `retry_at` (Unix seconds), `pages`, `items`. Candidate/checkpoint are normalized remote UTC timestamps. Page counters belong to the current/latest run, not a server-reported total. |
 | `remote_failures` | Non-null TEXT `source_id`, `site`, `remote_id`, `issue_key`, `error`, `attempted_at`; composite primary key `(source_id,site,remote_id)`. Tracks detail/conversion failures, including issues that have never been published locally. Cleared on successful publication or explicit source removal. |
 
@@ -126,3 +126,17 @@ Retrieval uses an in-memory snapshot, refreshed when the read connection's `PRAG
 ## Source configuration and status
 
 Folder sources are stored in config.toml as sources records with id, kind=folder, name, path, exclusions, text, images, and paused. Legacy folder vectors are retained as a derived compatibility view for existing indexing code. A source ID survives display-name and path edits; changing a path reindexes that location. SQLite file identity/root storage is unchanged in this release; no schema migration is needed. Counts are read in one read-only transaction and count files rather than chunks. Every indexed file is filename-searchable. Ready, queued, processing, attention and skipped are disjoint item counts, prioritized in that order of checks: attention, processing, skipped, queued, ready. Embedding readiness requires current-model, current-content-hash embeddings for all ready chunks of a file. Per-stage counters are informational and can overlap. Offline or paused sources retain their last indexed snapshot.
+
+## Version 5: remote image attachments
+
+`attachments` links an image `file_id` to its `parent_file_id`, connector, source ID and stable remote attachment ID. It stores filename, MIME type, byte size, content hash and sync timestamp. Files use the parent's source root; their path points to a Windows-local cached image. Search and opening resolve the parent URL. Extracted documents, chunks, vectors and image jobs use the existing tables.
+
+`attachment_scans` records the last scanned remote modification time for each parent. Existing parents without a scan are backfilled in batches of 100. Each parent is checkpointed only after its attachments succeed. Parent removal cascades to child files and their derived index rows. Unreferenced cached files and thumbnails are collected after a one-day grace period.
+
+## Version 6: Markdown-first Jira content
+
+The migration renames raw_adf to raw_content, adds content_format (legacy rows start as adf), and resets remote sync checkpoints. Existing indexed content remains available during the full refresh. The inspector exposes both the original body and actual format. New chunks and vectors replace prior versions when the converted content changes.
+
+## Version 7: Jira ticket metadata
+
+The metadata JSON column on remote_items stores status name/category, assignee, issue type, priority, project, created date, reporter, and labels. Existing remote_updated and synced_at remain authoritative timestamps. The sync scope version changes to refresh existing tickets. Metadata updates do not replace chunks or embeddings. Attachment results resolve metadata through parent_file_id.

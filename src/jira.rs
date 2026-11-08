@@ -13,6 +13,7 @@ pub struct Settings {
     pub jql: String,
     pub poll_seconds: u64,
     pub page_size: usize,
+    pub reload_generation: u64,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -23,6 +24,7 @@ impl Default for Settings {
             jql: "project = CORE".into(),
             poll_seconds: 300,
             page_size: 2,
+            reload_generation: 0,
         }
     }
 }
@@ -68,6 +70,52 @@ pub fn normalized_timestamp(value: &str) -> Result<String> {
 }
 pub fn now() -> String {
     Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Metadata {
+    pub status: String,
+    pub category: String,
+    pub assignee: String,
+    pub issue_type: String,
+    pub priority: String,
+    pub project: String,
+    pub created: String,
+    pub reporter: String,
+    pub labels: Vec<String>,
+    pub key: String,
+    pub updated: String,
+    pub synced: String,
+}
+impl Metadata {
+    fn from_fields(f: &Value) -> Self {
+        let text = |v: &Value| v.as_str().unwrap_or_default().to_owned();
+        Self {
+            status: text(&f["status"]["name"]),
+            category: text(&f["status"]["statusCategory"]["key"]),
+            assignee: if f.get("assignee").is_some_and(Value::is_null) { "Unassigned".into() } else { text(&f["assignee"]["displayName"]) },
+            issue_type: text(&f["issuetype"]["name"]),
+            priority: text(&f["priority"]["name"]),
+            project: text(&f["project"]["name"]),
+            created: text(&f["created"]),
+            reporter: text(&f["reporter"]["displayName"]),
+            labels: f["labels"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default(),
+            ..Self::default()
+        }
+    }
+}
+
+pub fn metadata(db: &Connection, path: &str) -> Result<Option<Metadata>> {
+    let row: Option<(String, String, String, String)> = db.query_row(
+        "SELECT r.metadata,r.issue_key,r.remote_updated,r.synced_at FROM files f LEFT JOIN attachments a ON a.file_id=f.id JOIN remote_items r ON r.file_id=coalesce(a.parent_file_id,f.id) WHERE f.path=?1",
+        [path], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
+    ).optional()?;
+    row.map(|(json,key,updated,synced)| {
+        let mut value: Metadata = serde_json::from_str(&json)?;
+        value.key=key; value.updated=updated; value.synced=synced;
+        Ok(value)
+    }).transpose()
 }
 pub fn scope_jql(settings: &Settings, checkpoint: Option<&str>) -> Result<String> {
     let input = settings.jql.trim();
@@ -120,18 +168,53 @@ pub trait Provider {
 }
 impl Provider for crate::bifrost::Mcp {
     fn page(&mut self, s: &Settings, jql: &str, token: Option<&str>) -> Result<Value> {
-        let mut args = json!({"cloudId":s.cloud_id,"jql":jql,"maxResults":s.page_size,"fields":["id","key","summary","description","updated"],"searchResultMode":"issues"});
+        let mut args = json!({"cloudId":s.cloud_id,"jql":jql,"maxResults":s.page_size,"fields":["id","key","summary","description","updated","status","assignee","issuetype","priority","project","created","reporter","labels"],"searchResultMode":"issues","view":"full","responseContentFormat":"markdown"});
         if let Some(token) = token {
             args["nextPageToken"] = token.into();
         }
-        if self.supports("jira_searchJiraIssuesUsingJql", "responseContentFormat") {
-            args["responseContentFormat"] = "adf".into();
-        }
-        self.call("jira_searchJiraIssuesUsingJql", args)
+        self.call("jira_searchJiraIssuesUsingJql", args).map(normalize_format)
     }
     fn issue(&mut self, s: &Settings, key: &str) -> Result<Value> {
-        self.call("jira_getJiraIssue",json!({"cloudId":s.cloud_id,"issueIdOrKey":key,"fields":["summary","description","updated"],"responseContentFormat":"adf","updateHistory":false}))
+        let mut args=json!({"cloudId":s.cloud_id,"issueIdOrKey":key,"fields":["summary","description","updated","status","assignee","issuetype","priority","project","created","reporter","labels"],"responseContentFormat":"markdown","view":"full"});
+        let value=normalize_format(self.call("jira_getJiraIssue",args.clone())?);
+        if description_format(&value)==Some("mixed") {
+            args["responseContentFormat"]=json!("html");
+            return self.call("jira_getJiraIssue",args).map(normalize_format);
+        }
+        Ok(value)
     }
+}
+pub fn normalize_format(mut value: Value) -> Value {
+    let format=value.get("appliedContentFormat").cloned().unwrap_or(json!("markdown"));
+    if let Some(issues)=value.get_mut("issues").and_then(Value::as_array_mut) {
+        for issue in issues {normalize_issue(issue,&format);}
+    } else {normalize_issue(&mut value,&format);}
+    value
+}
+fn normalize_issue(value: &mut Value, inherited: &Value) {
+    // The full v2 view omits empty description fields, even when explicitly requested.
+    if let Some(fields)=value.get_mut("fields").and_then(Value::as_object_mut) {
+        fields.entry("description").or_insert(Value::Null);
+    }
+    if value["fields"]["description"].is_null() {
+        value["appliedContentFormat"]=json!("markdown");
+    } else if value.get("appliedContentFormat").is_none() {
+        value["appliedContentFormat"]=inherited.clone();
+    }
+}
+fn description_format(value: &Value) -> Option<&str> {
+    value["fields"].get("appliedContentFormat").or_else(||value.get("appliedContentFormat")).and_then(Value::as_str)
+}
+pub fn extract_description(value: &Value, format: &str) -> Result<crate::adf::Extracted> {
+    if value.is_null() || value.is_object() {return crate::adf::extract(value);}
+    let body=value.as_str().context("Unexpected description type")?;
+    ensure!(body.len()<=2*1024*1024,"Description exceeds 2 MiB");
+    let text=match format {
+        "markdown" => body.to_owned(),
+        "html" => html2text::from_read(body.as_bytes(),120)?,
+        _=>anyhow::bail!("Unsupported Jira description format: {format}")
+    };
+    Ok(crate::adf::Extracted{text,warnings:vec![]})
 }
 struct Item {
     id: String,
@@ -142,6 +225,8 @@ struct Item {
     text: String,
     warnings: Vec<String>,
     hash: String,
+    format: String,
+    metadata: Metadata,
 }
 fn item(value: Value, project: &str) -> Result<Item> {
     ensure!(
@@ -179,11 +264,12 @@ fn item(value: Value, project: &str) -> Result<Item> {
         .get("description")
         .context("Issue omitted description field")?
         .clone();
-    let extracted = crate::adf::extract(&adf)?;
+    let format=description_format(&value).unwrap_or(if adf.is_object(){"adf"}else{"markdown"}).to_owned();
+    let extracted = extract_description(&adf, &format)?;
     let text = format!("# {key}: {title}\n\n{}", extracted.text);
     let hash = blake3::hash(
         format!(
-            "jira-adf-v1\n{key}\n{title}\n{}",
+            "jira-content-v2\n{format}\n{key}\n{title}\n{}",
             serde_json::to_string(&adf)?
         )
         .as_bytes(),
@@ -199,6 +285,8 @@ fn item(value: Value, project: &str) -> Result<Item> {
         text,
         warnings: extracted.warnings,
         hash,
+        format,
+        metadata: Metadata::from_fields(fields),
     })
 }
 #[derive(Debug, PartialEq)]
@@ -217,7 +305,7 @@ pub fn sync(
     cancel: impl Fn() -> bool,
 ) -> Result<Outcome> {
     settings.validate()?;
-    let hash = blake3::hash(serde_json::to_string(settings)?.as_bytes())
+    let hash = blake3::hash(format!("metadata-v1:{}",serde_json::to_string(settings)?).as_bytes())
         .to_hex()
         .to_string();
     db.execute("INSERT INTO remote_sync(source_id,scope_hash) VALUES(?1,?2) ON CONFLICT(source_id) DO NOTHING",params![source_id,hash])?;
@@ -297,11 +385,11 @@ pub fn sync(
             let stored:Option<String>=db.query_row("SELECT remote_updated FROM remote_items WHERE source_id=?1 AND remote_id=?2 AND site=?3",params![source_id,id,settings.site],|r|r.get(0)).optional()?;
             let structured = issue["fields"]
                 .get("description")
-                .is_some_and(|v| v.is_object() || v.is_null());
+                .is_some_and(|v| v.is_object() || v.is_null() || matches!(description_format(issue),Some("markdown"|"html")));
             let value = if structured {
                 issue.clone()
-            } else if stored.as_deref() == Some(&updated) {
-                let raw:String=db.query_row("SELECT raw_adf FROM remote_items WHERE source_id=?1 AND remote_id=?2 AND site=?3",params![source_id,id,settings.site],|r|r.get(0))?;
+            } else if stored.as_deref() == Some(&updated) && description_format(issue)!=Some("mixed") {
+                let raw:String=db.query_row("SELECT raw_content FROM remote_items WHERE source_id=?1 AND remote_id=?2 AND site=?3",params![source_id,id,settings.site],|r|r.get(0))?;
                 let mut copy = issue.clone();
                 copy["fields"]["description"] = serde_json::from_str(&raw)?;
                 copy
@@ -379,7 +467,8 @@ fn publish(db: &Connection, source: &str, s: &Settings, run: &str, item: &Item) 
         )
         .optional()?;
     let url = format!("{}/browse/{}", s.site.trim_end_matches('/'), item.key);
-    db.execute("INSERT INTO remote_items VALUES(?1,?2,'default',?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15) ON CONFLICT(file_id) DO UPDATE SET issue_key=excluded.issue_key,title=excluded.title,original_url=excluded.original_url,remote_updated=excluded.remote_updated,synced_at=excluded.synced_at,content_hash=excluded.content_hash,raw_adf=excluded.raw_adf,searchable_text=excluded.searchable_text,warnings=excluded.warnings,last_seen_run=excluded.last_seen_run,scope_hash=excluded.scope_hash",params![file,source,s.site,item.id,item.key,item.title,url,item.updated,now(),item.hash,serde_json::to_string(&item.adf)?,item.text,serde_json::to_string(&item.warnings)?,run,blake3::hash(serde_json::to_string(s)?.as_bytes()).to_hex().to_string()])?;
+    db.execute("INSERT INTO remote_items(file_id,source_id,connection_id,site,remote_id,issue_key,title,original_url,remote_updated,synced_at,content_hash,raw_content,searchable_text,warnings,last_seen_run,scope_hash) VALUES(?1,?2,'default',?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15) ON CONFLICT(file_id) DO UPDATE SET issue_key=excluded.issue_key,title=excluded.title,original_url=excluded.original_url,remote_updated=excluded.remote_updated,synced_at=excluded.synced_at,content_hash=excluded.content_hash,raw_content=excluded.raw_content,searchable_text=excluded.searchable_text,warnings=excluded.warnings,last_seen_run=excluded.last_seen_run,scope_hash=excluded.scope_hash",params![file,source,s.site,item.id,item.key,item.title,url,item.updated,now(),item.hash,serde_json::to_string(&item.adf)?,item.text,serde_json::to_string(&item.warnings)?,run,blake3::hash(format!("metadata-v1:{}",serde_json::to_string(s)?).as_bytes()).to_hex().to_string()])?;
+    db.execute("UPDATE remote_items SET content_format=?2,metadata=?3 WHERE file_id=?1",params![file,item.format,serde_json::to_string(&item.metadata)?])?;
     db.execute(
         "DELETE FROM remote_failures WHERE source_id=?1 AND site=?2 AND remote_id=?3",
         params![source, s.site, item.id],
@@ -405,7 +494,8 @@ pub fn record_error(db: &Connection, source: &str, error: &str) -> Result<()> {
 }
 pub fn open_target(db: &Connection, path: &str) -> Result<String> {
     if !path.starts_with("good-search://jira/") {
-        return Ok(path.into());
+        let parent:Option<String>=db.query_row("SELECT r.original_url FROM attachments a JOIN files f ON f.id=a.file_id JOIN remote_items r ON r.file_id=a.parent_file_id WHERE f.path=?1",[path],|r|r.get(0)).optional()?;
+        return Ok(parent.unwrap_or_else(||path.into()));
     }
     let url: String = db.query_row(
         "SELECT original_url FROM remote_items r JOIN files f ON f.id=r.file_id WHERE f.path=?1",

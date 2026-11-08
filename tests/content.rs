@@ -105,7 +105,7 @@ fn migrate_legacy_and_read_during_write() -> Result<()> {
     let mut db = open_db(&path)?;
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
-        4
+        7
     );
     assert_eq!(search(&db, "legacy", 10)?.len(), 1);
     let reader = open_reader(&path)?;

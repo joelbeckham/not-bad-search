@@ -70,6 +70,7 @@ pub(super) struct Preview {
     texture: Option<egui::TextureHandle>,
     initial_scroll: bool,
     open_error: Option<String>,
+    zoom: f32,
 }
 
 impl App {
@@ -89,6 +90,7 @@ impl App {
             texture: None,
             initial_scroll: true,
             open_error: None,
+            zoom: 1.0,
         });
         crate::trace(
             &self.config_path.with_file_name("worker-trace.log"),
@@ -172,6 +174,20 @@ impl App {
                 .truncate(),
         )
         .on_hover_text(hit.location());
+        jira_summary(ui, hit, true);
+        if let Some(info) = &hit.jira {
+            ui.horizontal_wrapped(|ui| {
+                for (label, value) in [("Assignee", &info.assignee), ("Type", &info.issue_type), ("Priority", &info.priority), ("Project", &info.project)] {
+                    if !value.is_empty() { ui.label(format!("{label}: {value}")); }
+                }
+            });
+            ui.collapsing("Ticket details", |ui| {
+                if !info.created.is_empty() { ui.label(format!("Created: {}", full_date(&info.created))); }
+                if !info.reporter.is_empty() { ui.label(format!("Reporter: {}", info.reporter)); }
+                if !info.labels.is_empty() { ui.label(format!("Labels: {}", info.labels.join(", "))); }
+                ui.label(format!("Last synced: {}", full_date(&info.synced)));
+            });
+        }
         if let Some(snippet) = &hit.snippet {
             ui.add(
                 egui::Label::new(RichText::new(snippet).color(Color32::from_rgb(120, 195, 204)))
@@ -223,6 +239,12 @@ impl App {
                 ui.label(error);
             }
             Some(Ok(Content::Image { original, .. })) => {
+                ui.horizontal(|ui| {
+                    if ui.button("−").clicked() {preview.zoom=(preview.zoom/1.25).max(0.25);}
+                    if ui.button("+").clicked() {preview.zoom=(preview.zoom*1.25).min(8.0);}
+                    if ui.button("Fit").clicked() {preview.zoom=1.0;}
+                    ui.weak("Scroll or drag to pan when zoomed");
+                });
                 ui.label(
                     RichText::new(format!("{} x {}", original.0, original.1))
                         .small()
@@ -233,8 +255,8 @@ impl App {
                 let scale = (available.x / texture.size_vec2().x)
                     .min(available.y / texture.size_vec2().y)
                     .clamp(0.01, 1.0);
-                ui.centered_and_justified(|ui| {
-                    ui.image((texture.id(), texture.size_vec2() * scale));
+                egui::ScrollArea::both().scroll_source(egui::scroll_area::ScrollSource::ALL).show(ui,|ui| {
+                    ui.image((texture.id(), texture.size_vec2() * scale * preview.zoom));
                 });
             }
             Some(Ok(Content::Text {
@@ -317,4 +339,54 @@ pub(super) fn fresh_enter(ctx: &egui::Context) -> bool {
             )
         })
     })
+}
+
+fn full_date(value: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|date| date.with_timezone(&chrono::Local).format("%b %d, %Y %H:%M:%S %:z").to_string())
+        .unwrap_or_else(|_| value.to_owned())
+}
+
+fn relative_date(value: &str) -> String {
+    let Ok(date) = chrono::DateTime::parse_from_rfc3339(value) else { return value.to_owned(); };
+    let seconds = chrono::Utc::now().signed_duration_since(date).num_seconds();
+    if seconds < 0 { return full_date(value); }
+    let (count, unit) = if seconds < 60 { return "just now".into(); }
+        else if seconds < 3600 { (seconds / 60, "minute") }
+        else if seconds < 86400 { (seconds / 3600, "hour") }
+        else { (seconds / 86400, "day") };
+    format!("{count} {unit}{} ago", if count == 1 { "" } else { "s" })
+}
+
+pub(super) fn jira_summary(ui: &mut egui::Ui, hit: &Hit, expanded: bool) {
+    let Some(info) = &hit.jira else { return; };
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 5.;
+        if !hit.path.starts_with("good-search://jira/") { ui.weak("Ticket:"); }
+        ui.hyperlink_to(&info.key, hit.location());
+        let color = match info.category.as_str() {
+            "done" => Color32::from_rgb(100, 205, 140),
+            "indeterminate" => Color32::from_rgb(100, 175, 245),
+            _ => Color32::GRAY,
+        };
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(14., 16.), egui::Sense::hover());
+        let center = rect.center();
+        let painter = ui.painter();
+        painter.circle_stroke(center, 5.5, egui::Stroke::new(1.4, color));
+        if info.category == "done" {
+            painter.line_segment([center + egui::vec2(-3., 0.), center + egui::vec2(-0.5, 2.5)], egui::Stroke::new(1.5, color));
+            painter.line_segment([center + egui::vec2(-0.5, 2.5), center + egui::vec2(3., -2.5)], egui::Stroke::new(1.5, color));
+        } else if info.category == "indeterminate" {
+            let points = (0..=16).map(|i| {
+                let angle = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 16.;
+                center + egui::vec2(angle.cos(), angle.sin()) * 4.
+            }).collect();
+            painter.add(egui::Shape::convex_polygon(points, color, egui::Stroke::NONE));
+        }
+        let status = if info.status.is_empty() { "Status unavailable" } else { &info.status };
+        response.on_hover_text(status);
+        ui.add(egui::Label::new(RichText::new(status).small().color(color)).truncate()).on_hover_text(status);
+        let date = if expanded { full_date(&info.updated) } else { relative_date(&info.updated) };
+        ui.add(egui::Label::new(RichText::new(format!("Updated {date}")).small().weak()).truncate()).on_hover_text(full_date(&info.updated));
+    });
 }

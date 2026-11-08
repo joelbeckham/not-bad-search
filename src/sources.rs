@@ -106,7 +106,7 @@ impl Config {
             .collect();
     }
     pub fn source_paused(&self, path: &Path) -> bool {
-        self.sources.iter().any(|s| s.path == path && s.paused)
+        self.sources.iter().any(|s| s.paused && (s.path == path || (!s.is_folder() && path == Path::new(&format!("jira:{}",s.id)))))
     }
     pub fn paused_roots_json(&self) -> String {
         serde_json::to_string(
@@ -188,7 +188,7 @@ pub fn snapshot(db: &rusqlite::Connection, config: &Config) -> Result<Vec<Status
                 message.push_str(&format!(" · {stale} not confirmed in current scope · {unresolved} unresolved · {warnings} with content warnings"));
             }
         }
-        let mut stmt = db.prepare("SELECT f.name, (SELECT status FROM documents WHERE file_id=f.id AND kind='text'), (SELECT state FROM image_jobs WHERE file_id=f.id), EXISTS(SELECT 1 FROM chunks c JOIN documents d ON d.id=c.document_id WHERE d.file_id=f.id AND d.status='ready'), EXISTS(SELECT 1 FROM chunks c JOIN documents d ON d.id=c.document_id WHERE d.file_id=f.id AND d.status='ready' AND NOT EXISTS(SELECT 1 FROM embeddings e WHERE e.chunk_id=c.id AND e.model=?2 AND e.content_hash=c.content_hash)) FROM files f WHERE f.root=?1")?;
+        let mut stmt = db.prepare("SELECT coalesce((SELECT filename FROM attachments WHERE file_id=f.id),f.name), (SELECT status FROM documents WHERE file_id=f.id AND kind='text'), (SELECT state FROM image_jobs WHERE file_id=f.id), EXISTS(SELECT 1 FROM chunks c JOIN documents d ON d.id=c.document_id WHERE d.file_id=f.id AND d.status='ready'), EXISTS(SELECT 1 FROM chunks c JOIN documents d ON d.id=c.document_id WHERE d.file_id=f.id AND d.status='ready' AND NOT EXISTS(SELECT 1 FROM embeddings e WHERE e.chunk_id=c.id AND e.model=?2 AND e.content_hash=c.content_hash)) FROM files f WHERE f.root=?1")?;
         let rows = stmt.query_map(rusqlite::params![root, crate::semantic::MODEL], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -207,9 +207,9 @@ pub fn snapshot(db: &rusqlite::Connection, config: &Config) -> Result<Vec<Status
                 .to_string_lossy()
                 .to_lowercase();
             let needs_text =
-                source.text && (remote || matches!(ext.as_str(), "md" | "markdown" | "txt"));
+                source.text && image.is_none() && (remote || matches!(ext.as_str(), "md" | "markdown" | "txt"));
             let needs_image =
-                source.images && matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp");
+                (source.images || remote) && matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp");
             if needs_text && text.as_deref() == Some("ready") {
                 status.text_ready += 1;
             }
