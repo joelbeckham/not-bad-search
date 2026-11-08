@@ -28,6 +28,28 @@ pub(super) struct State {
     error: String,
 }
 impl App {
+    fn draw_gmail_source(&mut self, ui:&mut egui::Ui,index:usize) {
+        let saved_paused=self.shared_config.lock().unwrap().sources.iter().find(|s|s.id==self.config.sources[index].id).map(|s|s.paused);
+        let source=&mut self.config.sources[index];
+        ui.heading(&source.name); ui.weak("Gmail through Bifrost · read-only");
+        source_status_card(ui,self.source_settings.stats.iter().find(|s|s.id==source.id),&mut source.paused,saved_paused);
+        ui.label("Name"); ui.text_edit_singleline(&mut source.name);
+        let settings=source.gmail.get_or_insert_with(Default::default);
+        ui.label("Gmail search query"); ui.text_edit_singleline(&mut settings.query);
+        ui.weak("Examples: in:inbox, label:engineering, from:person@example.com. Leave blank for all mail except spam and trash.");
+        ui.label("History start date (YYYY-MM-DD)");ui.text_edit_singleline(&mut settings.since);
+        ui.weak("Imports full conversations with messages matching the query and start date, including earlier replies in those conversations.");
+        ui.horizontal(|ui|{ui.label("Poll every");ui.add(egui::DragValue::new(&mut settings.poll_seconds).range(30..=86400).suffix(" seconds"));});
+        ui.weak("Rechecks matching conversations each cycle. Unchanged text is not re-embedded. Narrow the query for large mailboxes.");
+        if ui.button("Restart import on next save").clicked(){settings.reload_generation=settings.reload_generation.saturating_add(1);}
+        ui.weak("Indexes message text, senders, recipients and dates. Attachment contents are not indexed. Reading does not mark mail as read.");
+        ui.weak("Messages that are deleted or leave the query remain in the local index until this source is removed.");
+        ui.horizontal(|ui|{
+            if ui.button("Sync enabled sources now").clicked(){let _=self.remote_wake.try_send(());self.source_settings.checked=None;}
+            if ui.button("Remove source").clicked(){self.config.sources.remove(index);self.source_settings.selected=None;}
+        });
+        ui.weak("Uses the shared Bifrost connection in Processing. Save changes to apply.");
+    }
     fn draw_slack_source(&mut self, ui: &mut egui::Ui, index: usize) {
         let saved_paused=self.shared_config.lock().unwrap().sources.iter().find(|s|s.id==self.config.sources[index].id).map(|s|s.paused);
         let source=&mut self.config.sources[index];
@@ -325,6 +347,7 @@ impl App {
                 self.source_settings.selected = None;
                 return;
             };
+            if self.config.sources[index].kind == good_search::sources::SourceKind::Gmail { self.draw_gmail_source(ui,index); return; }
             if self.config.sources[index].kind == good_search::sources::SourceKind::Slack {
                 self.draw_slack_source(ui,index); return;
             }
@@ -422,6 +445,7 @@ impl App {
                 self.source_settings.selected = Some(source.id.clone());
                 self.config.sources.push(source);
             }
+            if ui.button("+ Add Gmail").clicked() { let source=Source::gmail_source(); self.source_settings.selected=Some(source.id.clone()); self.config.sources.push(source); }
             if ui.button("+ Add Slack").clicked() {
                 let source=Source::slack_source(); self.source_settings.selected=Some(source.id.clone()); self.config.sources.push(source);
             }
@@ -472,7 +496,7 @@ impl App {
                         }
                         ui.weak(source.label());
                     });
-                    ui.label(if let Some(slack)=&source.slack {
+                    ui.label(if let Some(gmail)=&source.gmail { format!("{} Â· since {}",gmail.query,gmail.since) } else if let Some(slack)=&source.slack {
                         format!("{} · {}",slack.workspace,slack.channel)
                     } else if source.is_folder() {
                         source.path.to_string_lossy().into_owned()

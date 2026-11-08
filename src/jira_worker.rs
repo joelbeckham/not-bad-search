@@ -45,7 +45,7 @@ pub(super) fn start(
                     .iter()
                     .filter(|s| !s.is_folder() && !s.paused)
                 {
-                    let poll_seconds = source.slack.as_ref().map(|s|s.poll_seconds).or_else(||source.jira.as_ref().map(|s|s.poll_seconds)).unwrap_or(300);
+                    let poll_seconds = source.gmail.as_ref().map(|s|s.poll_seconds).or_else(||source.slack.as_ref().map(|s|s.poll_seconds)).or_else(||source.jira.as_ref().map(|s|s.poll_seconds)).unwrap_or(300); // Remote sources share scheduling.
                     db.execute("INSERT INTO remote_sync(source_id,scope_hash) VALUES(?1,'') ON CONFLICT DO NOTHING",[&source.id])?;
                     let (last,retry,pending):(Option<String>,i64,bool)=db.query_row("SELECT last_success,retry_at,run_id IS NOT NULL FROM remote_sync WHERE source_id=?1",[&source.id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
                     let due = last
@@ -71,6 +71,7 @@ pub(super) fn start(
                             })
                     };
                     let result = (|| -> anyhow::Result<Outcome> {
+                        if let Some(settings)=&source.gmail { let mut client=Mcp::connect_discovery(Connection::load()?)?; return good_search::gmail::sync(&mut db,&source.id,settings,&mut client,cancel); }
                         if let Some(settings) = &source.slack {
                             let mut client = Mcp::connect_discovery(Connection::load()?)?;
                             let outcome=good_search::slack::sync(&mut db,&source.id,settings,&mut client,cancel)?;

@@ -56,7 +56,7 @@ impl App {
                 };
             }
             ui.separator();
-            for (kind, label) in [(good_search::sources::SourceKind::Folder, "Folders"), (good_search::sources::SourceKind::Jira, "Jira"), (good_search::sources::SourceKind::Slack, "Slack")] {
+            for (kind, label) in [(good_search::sources::SourceKind::Folder, "Folders"), (good_search::sources::SourceKind::Jira, "Jira"), (good_search::sources::SourceKind::Slack, "Slack"), (good_search::sources::SourceKind::Gmail, "Gmail")] {
                 let group: Vec<_> = sources.iter().filter(|s| s.kind == kind).collect();
                 if group.is_empty() {
                     continue;
@@ -110,7 +110,7 @@ impl App {
             ),
             |ui| {
                 ui.checkbox(&mut self.filters.text, "Text").on_hover_text(
-                    "Text items from any selected source, including Slack, Jira and Markdown",
+                    "Text items from any selected source, including Gmail, Slack, Jira and Markdown",
                 );
                 ui.checkbox(&mut self.filters.images, "Image")
                     .on_hover_text(
@@ -156,7 +156,7 @@ impl App {
                 for mode in [SortMode::PreferNewer, SortMode::NewestFirst, SortMode::OldestFirst] {
                     ui.selectable_value(&mut self.filters.sort,mode,mode.label());
                 }
-            }).response.on_hover_text("Dates: file modified time, Slack message posted time, or Jira ticket updated time. Attachments use their parent message/ticket date. Unknown dates sort last.");
+            }).response.on_hover_text("Dates: file modified time, Gmail latest message date, Slack message posted time, or Jira ticket updated time. Attachments use their parent message/ticket date. Unknown dates sort last.");
         if ui.small_button("Reset filters").clicked() {
             self.filters = Default::default();
             self.source_selection = Default::default();

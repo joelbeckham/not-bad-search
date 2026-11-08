@@ -211,7 +211,24 @@ fn main() -> Result<()> {
         println!("Slack sync {outcome:?}; {} messages, {} cached images",counts.0,counts.1);
         return Ok(());
     }
+    if args.get(1).is_some_and(|s|s=="gmail-smoke") {
+        struct Bounded(good_search::bifrost::Mcp);
+        impl good_search::gmail::Provider for Bounded {
+            fn read(&mut self,tool:&str,mut args:serde_json::Value)->Result<serde_json::Value> {
+                if tool=="search_threads" {args["pageSize"]=serde_json::json!(1);}
+                let mut value=self.0.gmail_read(tool,args)?;
+                if tool=="search_threads" {value.as_object_mut().context("object")?.remove("nextPageToken");}
+                Ok(value)
+            }
+        }
+        let mut db=good_search::open_db(std::path::Path::new(":memory:"))?;
+        let result=good_search::gmail::sync(&mut db,"smoke",&Default::default(),&mut Bounded(m),||false)?;
+        let (items,chunks):(i64,i64)=db.query_row("SELECT (SELECT count(*) FROM remote_items),(SELECT count(*) FROM chunks)",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
+        println!("Gmail bounded smoke: {result:?}; {items} conversations; {chunks} searchable chunks");return Ok(());
+    }
+    if args.get(1).is_some_and(|s| s == "gmail-probe") { println!("{}",serde_json::to_string_pretty(&m.gmail_read(args.get(2).context("tool")?,serde_json::from_str(args.get(3).context("args")?)?)?)?); return Ok(()); }
     if args.get(1).is_some_and(|s| s == "slack-probe") { let tool=args.get(2).context("Read tool required")?; let arguments=serde_json::from_str(args.get(3).context("JSON arguments required")?)?; println!("{}",serde_json::to_string_pretty(&m.slack_read(tool,arguments)?)?); return Ok(()); }
+    if args.get(1).is_some_and(|s| s == "gmail-catalog") { println!("{}", serde_json::to_string_pretty(&m.v2_catalog().as_object().unwrap().iter().filter(|(k,_)| k.to_lowercase().contains("gmail")).map(|(k,v)|(k.clone(),v.clone())).collect::<serde_json::Map<_,_>>())?); return Ok(()); }
     if args.get(1).is_some_and(|s| s == "slack-catalog") { println!("{}", serde_json::to_string_pretty(&m.v2_catalog().as_object().unwrap().iter().filter(|(k,_)| k.to_lowercase().contains("slack")).map(|(k,v)|(k.clone(),v.clone())).collect::<serde_json::Map<_,_>>())?); return Ok(()); }
     if args.get(1).is_some_and(|s| s == "v2-catalog") {
         println!(

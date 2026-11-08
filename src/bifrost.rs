@@ -128,7 +128,7 @@ impl Mcp {
             for tool in list["tools"].as_array().context("Invalid MCP tool list")? {
                 let name = tool["name"].as_str().context("Unnamed MCP tool")?;
                 m.discovered_tools.push(name.to_owned());
-                if name.starts_with("jira_v2-") || name.to_lowercase().contains("slack") {
+                if name.starts_with("jira_v2-") || name.to_lowercase().contains("slack") || name.to_lowercase().contains("gmail") {
                     m.discovered_schemas
                         .insert(name.to_owned(), tool["inputSchema"].clone());
                 }
@@ -167,6 +167,12 @@ impl Mcp {
     }
     pub fn catalog(&self) -> Value {
         json!(self.tools)
+    }
+    pub fn gmail_read(&mut self, tool: &str, arguments: Value) -> Result<Value> {
+        ensure!(["search_threads", "get_thread", "get_message", "list_labels"].contains(&tool), "Tool is outside the Gmail read allowlist");
+        let name=format!("gmail-{tool}");
+        ensure!(self.discovered_schemas.contains_key(&name), "Gmail tool unavailable: {name}");
+        crate::bifrost::tool_payload(self.rpc("tools/call",serde_json::json!({"name":name,"arguments":arguments}),false)?)
     }
     pub fn slack_read(&mut self, tool: &str, arguments: Value) -> Result<Value> {
         ensure!(["slack_list_user_channels", "slack_read_channel", "slack_read_thread", "slack_read_file"].contains(&tool), "Tool is outside the Slack read allowlist");

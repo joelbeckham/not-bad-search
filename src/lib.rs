@@ -76,7 +76,9 @@ impl Config {
                 bail!("Give each source a name");
             }
             self.source_matcher(&source.path)?;
-            if source.kind == sources::SourceKind::Slack {
+            if source.kind == sources::SourceKind::Gmail {
+                source.gmail.as_ref().context("Gmail source needs settings")?.validate()?;
+            } else if source.kind == sources::SourceKind::Slack {
                 source.slack.as_ref().context("Slack source needs settings")?.validate()?;
             } else if !source.is_folder() {
                 source
@@ -144,7 +146,7 @@ pub struct Hit {
     pub snippet: Option<String>,
 }
 impl Hit {
-    pub fn open_label(&self) -> &str { if self.slack { "Open in Slack" } else if self.original_url.is_some() { "Open in Jira" } else { "Open file" } }
+    pub fn open_label(&self) -> &str { if self.path.starts_with("good-search://gmail/") { "Open in Gmail" } else if self.slack { "Open in Slack" } else if self.original_url.is_some() { "Open in Jira" } else { "Open file" } }
     pub fn location(&self) -> &str {
         self.original_url.as_deref().unwrap_or(&self.path)
     }
@@ -164,7 +166,7 @@ pub(crate) fn remote_locations(db: &Connection, hits: &mut [Hit]) -> Result<()> 
     }
     for hit in hits.iter_mut().filter(|h| h.original_url.is_some()) {
         hit.slack = db.query_row("SELECT r.content_format='slack' FROM files f LEFT JOIN attachments a ON a.file_id=f.id JOIN remote_items r ON r.file_id=coalesce(a.parent_file_id,f.id) WHERE f.path=?1",[&hit.path],|r|r.get(0))?;
-        if !hit.slack { hit.jira = jira::metadata(db, &hit.path)?; }
+        if !hit.slack && !hit.path.starts_with("good-search://gmail/") { hit.jira = jira::metadata(db, &hit.path)?; }
     }
     Ok(())
 }
@@ -172,6 +174,7 @@ pub(crate) fn remote_locations(db: &Connection, hits: &mut [Hit]) -> Result<()> 
 pub mod filters;
 pub mod sorting;
 pub mod attachments;
+pub mod gmail;
 pub mod slack;
 pub mod slack_display;
 pub use filters::SearchFilters;

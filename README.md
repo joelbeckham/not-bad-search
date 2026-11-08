@@ -4,7 +4,7 @@ A Windows 11 filename and text search launcher in Rust, SQLite, and egui/eframe.
 
 ## Run
 
-Jira summaries and descriptions can also be imported through Bifrost with a scoped JQL source. See [Jira setup, synchronization and limitations](docs/jira-source.md). Remote searches and previews use the local index.
+Jira summaries and descriptions can also be imported through Bifrost with a scoped JQL source. See [Jira setup, synchronization and limitations](docs/jira-source.md). Remote searches and previews use the local index. Gmail conversations can also be imported through Bifrost; see [Gmail setup and limitations](docs/gmail-source.md).
 
 Launch `target\release\good-search.exe`. On first launch, enter the folders to index in Settings and choose **Save changes**. Nothing is indexed until you select folders.
 
@@ -127,7 +127,7 @@ Run `embedding-bench MODEL_FOLDER NEW_DATABASE` for deterministic relevance chec
 
 Three multiselect menus below the search box control results:
 
-- **Sources:** select entire Folders/Jira groups or individual sources. **All sources** is dynamic and automatically includes newly added sources. Paused sources remain searchable using their existing index.
+- **Sources:** select entire Folders/Jira/Slack/Gmail groups or individual sources. **All sources** is dynamic and automatically includes newly added sources. Paused sources remain searchable using their existing index.
 - **Content:** **Text** includes text items from any source, including Jira titles/descriptions and local Markdown. **Image** includes image filenames and extracted image text/descriptions. Non-image filenames are categorized as Text; a Jira title ending in an image extension remains Text.
 - **Matching:** **Keyword** includes names/titles and literal content matches; **Semantic** uses local embeddings. Semantic is disabled with an explanation when unavailable; there is no forced fallback to Keyword.
 
@@ -135,4 +135,4 @@ Options within a menu combine with OR, and menus combine with AND. All options s
 
 Search results use bundled Catppuccin Mocha file icons (MIT): 390 icons with upstream filename and extension associations. Exact names take precedence over compound extensions; matching is case-insensitive and unknown files use a document outline. See assets/catppuccin/README.md for provenance and regeneration. Icons render natively and are cached locally.
 
-Settings has Sources, Search, and Processing tabs. Every selected folder becomes a named source with a persistent ID, source-specific exclusions, text/image opt-ins, and pause state. Existing folder settings migrate automatically in memory and are persisted on Save changes. Sources shows file counts from the local index, separating filename searchability from readiness across enabled processing stages. Status reads run in a background thread only while Sources is open. Escape returns from a source detail view to the source list, then to the previous screen. Removing a source and saving removes its indexed records without deleting original files. No remote connectors are implemented.
+Settings has Sources, Search, and Processing tabs. Every selected folder becomes a named source with a persistent ID, source-specific exclusions, text/image opt-ins, and pause state. Existing folder settings migrate automatically in memory and are persisted on Save changes. Sources shows file counts from the local index, separating filename searchability from readiness across enabled processing stages. Status reads run in a background thread only while Sources is open. Escape returns from a source detail view to the source list, then to the previous screen. Removing a source and saving removes its indexed records without deleting original files. Jira, Slack and Gmail are available through Bifrost.
