@@ -27,7 +27,7 @@ impl Loader {
                 let request = work.lock().unwrap().take();
                 if let Some((id, path, query)) = request {
                     let result = (|| -> anyhow::Result<Content> {
-                        if path.starts_with("good-search://jira/") {
+                        if path.starts_with("good-search://") {
                             let db=good_search::open_reader(&database)?;
                             let (text,warnings):(String,String)=db.query_row("SELECT searchable_text,warnings FROM remote_items r JOIN files f ON f.id=r.file_id WHERE f.path=?1",[&path],|r|Ok((r.get(0)?,r.get(1)?)))?;
                             let text=if warnings!="[]"{format!("{text}\n\nIndexing notes: {warnings}")}else{text};
@@ -139,11 +139,7 @@ impl App {
                 preview.items.len()
             ));
             open |= ui
-                .button(if preview.items[preview.selected].original_url.is_some() {
-                    "Open in Jira"
-                } else {
-                    "Open file"
-                })
+                .button(preview.items[preview.selected].open_label())
                 .clicked();
         });
         let hit = &preview.items[preview.selected];
@@ -363,7 +359,7 @@ pub(super) fn jira_summary(ui: &mut egui::Ui, hit: &Hit, expanded: bool) {
     let Some(info) = &hit.jira else { return; };
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 5.;
-        if !hit.path.starts_with("good-search://jira/") { ui.weak("Ticket:"); }
+        if !hit.path.starts_with("good-search://") { ui.weak("Ticket:"); }
         ui.hyperlink_to(&info.key, hit.location());
         let color = match info.category.as_str() {
             "done" => Color32::from_rgb(100, 205, 140),

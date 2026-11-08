@@ -79,3 +79,6 @@ mod tests {
         }
     }
 }
+pub fn slack_icon() -> (&'static str, &'static [u8]) {
+    ("bytes://slack.svg", br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 3v14" stroke="#36c5f0" stroke-width="4" stroke-linecap="round"/><path d="M7 8h14" stroke="#2eb67d" stroke-width="4" stroke-linecap="round"/><path d="M16 7v14" stroke="#ecb22e" stroke-width="4" stroke-linecap="round"/><path d="M3 16h14" stroke="#e01e5a" stroke-width="4" stroke-linecap="round"/></svg>"##)
+}

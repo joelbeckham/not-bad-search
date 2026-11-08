@@ -312,7 +312,9 @@ impl App {
         self.selection_started = selection_started;
         self.background_refresh = !self.query.trim().is_empty();
     }
-    fn publish_hits(&mut self, hits: Vec<Hit>) {
+    fn publish_hits(&mut self, mut hits: Vec<Hit>) {
+        good_search::sorting::sort(&mut hits, &self.query, self.filters.sort, chrono::Utc::now().timestamp());
+        hits.truncate(100);
         self.selected = updated_selection(&self.hits, &hits, self.selected, self.selection_started);
         self.hits = hits;
         self.background_refresh = false;
@@ -397,7 +399,7 @@ mod selection_tests {
     use super::*;
     #[test]
     fn reranking_preserves_only_intentional_selection() {
-        let hit = |path: &str| Hit { path: path.into(), name: path.into(), snippet: None, original_url: None, jira: None };
+        let hit = |path: &str| Hit { path: path.into(), name: path.into(), snippet: None, original_url: None, jira: None, timestamp: None, slack: false };
         let old = vec![hit("a"), hit("b")];
         let new = vec![hit("b"), hit("c"), hit("a")];
         assert_eq!(updated_selection(&old, &new, 0, false), 0);
@@ -423,7 +425,7 @@ impl eframe::App for App {
                     );
                     self.lexical_hits = hits.clone();
                     let next_hits = if let Some(semantic) = &self.semantic_hits {
-                        good_search::semantic::merge(&query, hits, semantic.clone(), 100)
+                        good_search::semantic::merge(&query, hits, semantic.clone(), usize::MAX)
                     } else {
                         hits
                     };
@@ -517,7 +519,7 @@ impl eframe::App for App {
                                     &query,
                                     self.lexical_hits.clone(),
                                     hits,
-                                    100,
+                                    usize::MAX,
                                 );
                                 self.publish_hits(hits);
                             }

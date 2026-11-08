@@ -37,8 +37,8 @@ impl App {
             selected[0].name.chars().take(22).collect::<String>()
         } else if selected.iter().all(|s| s.is_folder()) {
             format!("Folders ({})", selected.len())
-        } else if selected.iter().all(|s| !s.is_folder()) {
-            format!("Jira ({})", selected.len())
+        } else if selected.iter().all(|s| s.kind == selected[0].kind) {
+            format!("{} ({})", selected[0].label(), selected.len())
         } else {
             format!("{} sources", selected.len())
         };
@@ -56,8 +56,8 @@ impl App {
                 };
             }
             ui.separator();
-            for (folder, label) in [(true, "Folders"), (false, "Jira")] {
-                let group: Vec<_> = sources.iter().filter(|s| s.is_folder() == folder).collect();
+            for (kind, label) in [(good_search::sources::SourceKind::Folder, "Folders"), (good_search::sources::SourceKind::Jira, "Jira"), (good_search::sources::SourceKind::Slack, "Slack")] {
+                let group: Vec<_> = sources.iter().filter(|s| s.kind == kind).collect();
                 if group.is_empty() {
                     continue;
                 }
@@ -110,7 +110,7 @@ impl App {
             ),
             |ui| {
                 ui.checkbox(&mut self.filters.text, "Text").on_hover_text(
-                    "Text items from any selected source, including Jira and Markdown",
+                    "Text items from any selected source, including Slack, Jira and Markdown",
                 );
                 ui.checkbox(&mut self.filters.images, "Image")
                     .on_hover_text(
@@ -149,6 +149,14 @@ impl App {
                 }
             },
         );
+        egui::ComboBox::from_id_salt("result_sort")
+            .selected_text(format!("Sort: {}", self.filters.sort.label()))
+            .show_ui(ui, |ui| {
+                use good_search::sorting::SortMode;
+                for mode in [SortMode::PreferNewer, SortMode::NewestFirst, SortMode::OldestFirst] {
+                    ui.selectable_value(&mut self.filters.sort,mode,mode.label());
+                }
+            }).response.on_hover_text("Dates: file modified time, Slack message posted time, or Jira ticket updated time. Attachments use their parent message/ticket date. Unknown dates sort last.");
         if ui.small_button("Reset filters").clicked() {
             self.filters = Default::default();
             self.source_selection = Default::default();

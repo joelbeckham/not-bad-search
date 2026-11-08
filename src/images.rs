@@ -158,7 +158,7 @@ pub fn discover(db: &mut Connection, config: &Config) -> Result<()> {
             tx.commit()?;
             continue;
         }
-        if !root.starts_with("jira:") && !Path::new(&root).is_dir() {
+        if !root.starts_with("jira:") && !root.starts_with("slack:") && !Path::new(&root).is_dir() {
             continue;
         }
         let (hash, state, detail) = match image_bytes(Path::new(&path)) {
@@ -330,5 +330,5 @@ fn eligible(config: &Config, root: &str) -> bool {
         || config
             .sources
             .iter()
-            .any(|s| !s.is_folder() && root == format!("jira:{}", s.id))
+            .any(|s| !s.is_folder() && (s.kind == crate::sources::SourceKind::Jira || s.images) && root == s.root())
 }

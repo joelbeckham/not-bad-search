@@ -28,6 +28,28 @@ pub(super) struct State {
     error: String,
 }
 impl App {
+    fn draw_slack_source(&mut self, ui: &mut egui::Ui, index: usize) {
+        let saved_paused=self.shared_config.lock().unwrap().sources.iter().find(|s|s.id==self.config.sources[index].id).map(|s|s.paused);
+        let source=&mut self.config.sources[index];
+        ui.heading(&source.name);
+        ui.weak("Slack through Bifrost · read-only");
+        source_status_card(ui,self.source_settings.stats.iter().find(|s|s.id==source.id),&mut source.paused,saved_paused);
+        ui.label("Name"); ui.text_edit_singleline(&mut source.name);
+        let settings=source.slack.get_or_insert_with(Default::default);
+        ui.label("Workspace URL"); ui.text_edit_singleline(&mut settings.workspace);
+        ui.label("Channel ID"); ui.text_edit_singleline(&mut settings.channel);
+        ui.weak("Copy the channel ID from Slack channel details. Add a source for each channel.");
+        ui.label("Include messages posted since (YYYY-MM-DD)"); ui.text_edit_singleline(&mut settings.since);
+        ui.horizontal(|ui| {ui.label("Poll every"); ui.add(egui::DragValue::new(&mut settings.poll_seconds).range(30..=86400).suffix(" seconds"));});
+        ui.checkbox(&mut source.images,"Index shared images: text and descriptions");
+        ui.weak("Images use the OpenAI settings in Processing. PNG, JPEG and WebP up to 10 MiB are supported.");
+        ui.weak("Includes replies to messages in the date range. Rechecks the range for edits and new replies. Deleted messages and lost access retain the last local copy until the source is removed.");
+        ui.horizontal(|ui| {
+            if ui.button("Sync enabled sources now").clicked() {let _=self.remote_wake.try_send(()); self.source_settings.checked=None;}
+            if ui.button("Remove source").clicked() {self.config.sources.remove(index);self.source_settings.selected=None;}
+        });
+        ui.weak("Uses the shared Bifrost connection in Processing. Save changes to apply.");
+    }
     fn draw_jira_source(&mut self, ui: &mut egui::Ui, index: usize) {
         let saved_paused = self
             .shared_config
@@ -289,6 +311,9 @@ impl App {
                 self.source_settings.selected = None;
                 return;
             };
+            if self.config.sources[index].kind == good_search::sources::SourceKind::Slack {
+                self.draw_slack_source(ui,index); return;
+            }
             if !self.config.sources[index].is_folder() {
                 self.draw_jira_source(ui, index);
                 return;
@@ -383,6 +408,9 @@ impl App {
                 self.source_settings.selected = Some(source.id.clone());
                 self.config.sources.push(source);
             }
+            if ui.button("+ Add Slack").clicked() {
+                let source=Source::slack_source(); self.source_settings.selected=Some(source.id.clone()); self.config.sources.push(source);
+            }
             if ui.button("+ Add folder").clicked() {
                 let mut source = Source::folder(std::path::PathBuf::new());
                 source.id = blake3::hash(format!("{:?}", std::time::SystemTime::now()).as_bytes())
@@ -428,9 +456,11 @@ impl App {
                         if ui.button(RichText::new(&source.name).size(17.)).clicked() {
                             self.source_settings.selected = Some(source.id.clone());
                         }
-                        ui.weak(if source.is_folder() { "Folder" } else { "Jira" });
+                        ui.weak(source.label());
                     });
-                    ui.label(if source.is_folder() {
+                    ui.label(if let Some(slack)=&source.slack {
+                        format!("{} · {}",slack.workspace,slack.channel)
+                    } else if source.is_folder() {
                         source.path.to_string_lossy().into_owned()
                     } else {
                         source
@@ -675,7 +705,7 @@ fn source_status_card(
 fn draw_status(ui: &mut egui::Ui, s: &Status, paused: bool, detail: bool) {
     if let Some(status) = &s.remote_status {
         ui.label(format!(
-            "{}{} issues indexed locally",
+            "{}{} items indexed locally",
             if paused { "Paused · " } else { "" },
             s.items
         ));

@@ -12,7 +12,7 @@ pub const READ_TOOLS: [&str; 5] = [
     "jira_searchJiraIssuesUsingJql",
     "jira_getJiraIssue",
 ];
-pub const MAX_RESPONSE: usize = 4 * 1024 * 1024;
+pub const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 #[derive(Serialize, Deserialize)]
 pub struct Connection {
     pub endpoint: String,
@@ -128,7 +128,7 @@ impl Mcp {
             for tool in list["tools"].as_array().context("Invalid MCP tool list")? {
                 let name = tool["name"].as_str().context("Unnamed MCP tool")?;
                 m.discovered_tools.push(name.to_owned());
-                if name.starts_with("jira_v2-") {
+                if name.starts_with("jira_v2-") || name.to_lowercase().contains("slack") {
                     m.discovered_schemas
                         .insert(name.to_owned(), tool["inputSchema"].clone());
                 }
@@ -167,6 +167,14 @@ impl Mcp {
     }
     pub fn catalog(&self) -> Value {
         json!(self.tools)
+    }
+    pub fn slack_read(&mut self, tool: &str, arguments: Value) -> Result<Value> {
+        ensure!(["slack_list_user_channels", "slack_read_channel", "slack_read_thread", "slack_read_file"].contains(&tool), "Tool is outside the Slack read allowlist");
+        let name = format!("slack-{tool}");
+        ensure!(self.discovered_schemas.contains_key(&name), "Required Slack tool unavailable: {tool}");
+        let result = self.rpc("tools/call", json!({"name":name,"arguments":arguments}), false)?;
+        ensure!(result["isError"].as_bool() != Some(true), "Slack read failed; verify channel access and connector configuration");
+        Ok(result)
     }
     /// Discovery only: these names do not grant permission to call a tool.
     pub fn discovered_tools(&self) -> &[String] {
@@ -236,7 +244,7 @@ impl Mcp {
             json!({"name":name,"arguments":arguments}),
             false,
         )?)?;
-        Ok(if name.starts_with("jira_v2-") {
+        Ok(if name.starts_with("jira_v2-") || name.to_lowercase().contains("slack") {
             result.get("data").cloned().unwrap_or(result)
         } else {
             result
@@ -294,7 +302,7 @@ impl Mcp {
             .map_err(|_| anyhow::anyhow!("Could not read Bifrost response"))?;
         ensure!(
             bytes.len() <= MAX_RESPONSE,
-            "Bifrost response exceeded the 4 MiB limit; reduce page size or scope"
+            "Bifrost response exceeded the 16 MiB limit; reduce page size or scope"
         );
         let value = decode_rpc(&bytes, sse, id)?;
         rpc_result(value)

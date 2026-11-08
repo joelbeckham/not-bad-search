@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SearchFilters {
+    pub sort: crate::sorting::SortMode,
     pub text: bool,
     pub images: bool,
     pub semantic: bool,
@@ -13,6 +14,7 @@ pub struct SearchFilters {
 impl Default for SearchFilters {
     fn default() -> Self {
         Self {
+            sort: Default::default(),
             text: true,
             images: true,
             semantic: true,
@@ -50,7 +52,7 @@ impl SourceSelection {
                     if s.is_folder() {
                         s.path.to_string_lossy().into_owned()
                     } else {
-                        format!("jira:{}", s.id)
+                        s.root()
                     }
                 })
                 .collect()

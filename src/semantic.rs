@@ -199,7 +199,7 @@ impl VectorIndex {
         let mut hits = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let mut stmt=db.prepare("SELECT f.path,f.name,d.kind,c.body FROM embeddings e JOIN chunks c ON c.id=e.chunk_id AND c.content_hash=e.content_hash JOIN documents d ON d.id=c.document_id JOIN files f ON f.id=d.file_id WHERE e.chunk_id=?1 AND e.model=?2 AND e.content_hash=?3 AND d.status='ready'")?;
-        for (id, _, hash) in scores.into_iter().take(2000) {
+        for (id, _, hash) in scores.into_iter().take(if filters.sort.by_date() {usize::MAX} else {2000}) {
             let row: Option<(String, String, String, String)> = stmt
                 .query_row(params![id, MODEL, hash], |r| {
                     Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
@@ -214,7 +214,7 @@ impl VectorIndex {
                     };
                     hits.push(Hit {
                         original_url: None,
-                        jira: None,
+                        jira: None, timestamp: None, slack: false,
                         path,
                         name,
                         snippet: Some(format!(
@@ -225,13 +225,15 @@ impl VectorIndex {
                                 .replace(['\n', '\r'], " ")
                         )),
                     });
-                    if hits.len() >= limit {
+                    if !filters.sort.by_date() && hits.len() >= limit {
                         break;
                     }
                 }
             }
         }
         crate::remote_locations(db, &mut hits)?;
+        if filters.sort.by_date() { crate::sorting::sort(&mut hits,"",filters.sort,chrono::Utc::now().timestamp()); }
+        hits.truncate(limit);
         Ok(hits)
     }
 }

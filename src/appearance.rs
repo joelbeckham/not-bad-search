@@ -192,7 +192,9 @@ impl App {
                         } else {
                             key(ui, "Enter");
                             ui.label(
-                                RichText::new(if self.preview.as_ref().is_some_and(|p|p.items[p.selected].original_url.is_some()) {
+                                RichText::new(if self.preview.as_ref().is_some_and(|p|p.items[p.selected].slack) {
+                                    "Open in Slack"
+                                } else if self.preview.as_ref().is_some_and(|p|p.items[p.selected].original_url.is_some()) {
                                     "Open in Jira"
                                 } else if self.preview.is_some() {
                                     "Open file"
@@ -310,7 +312,9 @@ impl App {
                                 rect.min + Vec2::new(14., 18.),
                                 Vec2::splat(22.),
                             );
-                            let (uri, bytes) = if hit.path.starts_with("good-search://jira/") {
+                            let (uri, bytes) = if hit.path.starts_with("good-search://slack/") {
+                                good_search::file_icons::slack_icon()
+                            } else if hit.path.starts_with("good-search://jira/") {
                                 good_search::file_icons::jira_icon()
                             } else {
                                 good_search::file_icons::icon(if hit.original_url.is_some() { &hit.path } else { &hit.name })
@@ -323,7 +327,7 @@ impl App {
                                 .extension()
                                 .and_then(|s| s.to_str())
                                 .unwrap_or("file");
-                            let ext: String = if hit.original_url.is_some() { "JIRA".into() } else {
+                            let ext: String = if hit.slack { "SLACK".into() } else if hit.original_url.is_some() { "JIRA".into() } else {
                                 ext.chars().take(8).collect::<String>().to_uppercase() };
                             let text_rect = egui::Rect::from_min_max(
                                 rect.min + Vec2::new(48., 8.),
@@ -361,7 +365,7 @@ impl App {
                                 if ui.button("Preview").clicked() { self.selected=index; self.selection_started=true; preview=true;ui.close(); }
                                 if ui.button("Inspect indexed data").clicked() {inspect=Some(hit.path.clone());ui.close();}
                                 if ui.button(if hit.original_url.is_some() {"Copy link"} else {"Copy path"}).clicked() {ctx.copy_text(hit.location().to_owned());ui.close();}
-                                if ui.button(if hit.original_url.is_some() {"Open in Jira"} else {"Open file"}).clicked() {open=Some(hit.path.clone());ui.close();}
+                                if ui.button(hit.open_label()).clicked() {open=Some(hit.path.clone());ui.close();}
                             });
                             if response.clicked() {
                                 self.selected = index;

@@ -6,7 +6,7 @@ Executable definitions: [schema.sql](../src/schema.sql). Migrations and connecti
 
 The Windows-local database is `%LOCALAPPDATA%\GoodSearch\index.sqlite`. `GOOD_SEARCH_DATA` overrides the directory. WSL UNC paths are sources only. Configuration lives in `config.toml` beside the index.
 
-`PRAGMA user_version = 7` identifies this schema. Startup adopts the original unversioned filename index (version 0) and applies numbered transactional migrations, preserving existing rows. Workers start after migration. Newer versions are rejected.
+`PRAGMA user_version = 8` identifies this schema. Startup adopts the original unversioned filename index (version 0) and applies numbered transactional migrations, preserving existing rows. Workers start after migration. Newer versions are rejected.
 
 ## Tables and columns
 
@@ -140,3 +140,9 @@ The migration renames raw_adf to raw_content, adds content_format (legacy rows s
 ## Version 7: Jira ticket metadata
 
 The metadata JSON column on remote_items stores status name/category, assignee, issue type, priority, project, created date, reporter, and labels. Existing remote_updated and synced_at remain authoritative timestamps. The sync scope version changes to refresh existing tickets. Metadata updates do not replace chunks or embeddings. Attachment results resolve metadata through parent_file_id.
+
+## Version 8: result dates
+
+file_times stores local file modification timestamps collected during folder reconciliation. The result_dates view resolves local modified time, Slack posted time, or Jira updated time; attachments inherit their parent's date. Cache and ingestion times never determine ranking. Missing dates sort last. Folder timestamps populate on the next scan.
+
+The Sort dropdown defaults to Prefer newer: a maximum 15% reciprocal-rank boost with a 180-day half-life, retaining exact-name priority. Newest first and Oldest first order by timestamp before truncating results, including content and semantic matches. Equal dates use stable paths as tie breakers.

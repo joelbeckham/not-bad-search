@@ -20,14 +20,36 @@ pub struct Source {
     pub paused: bool,
     #[serde(default)]
     pub jira: Option<crate::jira::Settings>,
+    #[serde(default)]
+    pub slack: Option<crate::slack::Settings>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceKind {
     Folder,
     Jira,
+    Slack,
 }
 impl Source {
+    pub fn root(&self) -> String {
+        match self.kind {
+            SourceKind::Folder => self.path.to_string_lossy().into_owned(),
+            SourceKind::Jira => format!("jira:{}", self.id),
+            SourceKind::Slack => format!("slack:{}", self.id),
+        }
+    }
+    pub fn label(&self) -> &'static str {
+        match self.kind { SourceKind::Folder => "Folder", SourceKind::Jira => "Jira", SourceKind::Slack => "Slack" }
+    }
+    pub fn slack_source() -> Self {
+        let mut source = Self::jira_source();
+        source.kind = SourceKind::Slack;
+        source.name = "Slack channel".into();
+        source.jira = None;
+        source.slack = Some(Default::default());
+        source.images = true;
+        source
+    }
     pub fn is_folder(&self) -> bool {
         self.kind == SourceKind::Folder
     }
@@ -62,6 +84,7 @@ impl Source {
             images: false,
             paused: false,
             jira: None,
+            slack: None,
         }
     }
 }
@@ -106,7 +129,7 @@ impl Config {
             .collect();
     }
     pub fn source_paused(&self, path: &Path) -> bool {
-        self.sources.iter().any(|s| s.paused && (s.path == path || (!s.is_folder() && path == Path::new(&format!("jira:{}",s.id)))))
+        self.sources.iter().any(|s| s.paused && (s.path == path || (!s.is_folder() && path == Path::new(&s.root()))))
     }
     pub fn paused_roots_json(&self) -> String {
         serde_json::to_string(
@@ -118,7 +141,7 @@ impl Config {
                     if s.is_folder() {
                         s.path.to_string_lossy().into_owned()
                     } else {
-                        format!("jira:{}", s.id)
+                        s.root()
                     }
                 })
                 .collect::<Vec<_>>(),
@@ -158,7 +181,7 @@ pub fn snapshot(db: &rusqlite::Connection, config: &Config) -> Result<Vec<Status
     for source in &config.sources {
         let remote = !source.is_folder();
         let root = if remote {
-            format!("jira:{}", source.id)
+            source.root()
         } else {
             source.path.to_string_lossy().into_owned()
         };
@@ -171,7 +194,7 @@ pub fn snapshot(db: &rusqlite::Connection, config: &Config) -> Result<Vec<Status
             use rusqlite::OptionalExtension;
             status.remote_status=Some(db.query_row("SELECT coalesce(last_success,'Never'),error,run_id IS NOT NULL,pages,items FROM remote_sync WHERE source_id=?1",[&source.id],|r| {
                 let error:String=r.get(1)?;
-                Ok(format!("Last successful sync: {} · {} pages / {} issues this run{}{}",r.get::<_,String>(0)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,if r.get::<_,bool>(2)? {" · import pending"}else{""},if error.is_empty(){String::new()}else{format!(" · {error}")}))
+                Ok(format!("Last successful sync: {} · {} pages / {} items this run{}{}",r.get::<_,String>(0)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,if r.get::<_,bool>(2)? {" · import pending"}else{""},if error.is_empty(){String::new()}else{format!(" · {error}")}))
             }).optional()?.unwrap_or_else(||"Not synced yet".into()));
             let stale:i64=db.query_row("SELECT count(*) FROM remote_items r JOIN remote_sync s ON s.source_id=r.source_id WHERE r.source_id=?1 AND r.scope_hash!=s.scope_hash",[&source.id],|r|r.get(0))?;
             let unresolved: i64 = db.query_row(

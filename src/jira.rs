@@ -493,7 +493,7 @@ pub fn record_error(db: &Connection, source: &str, error: &str) -> Result<()> {
     Ok(())
 }
 pub fn open_target(db: &Connection, path: &str) -> Result<String> {
-    if !path.starts_with("good-search://jira/") {
+    if !path.starts_with("good-search://") {
         let parent:Option<String>=db.query_row("SELECT r.original_url FROM attachments a JOIN files f ON f.id=a.file_id JOIN remote_items r ON r.file_id=a.parent_file_id WHERE f.path=?1",[path],|r|r.get(0)).optional()?;
         return Ok(parent.unwrap_or_else(||path.into()));
     }

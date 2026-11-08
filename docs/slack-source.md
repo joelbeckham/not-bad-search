@@ -1,0 +1,13 @@
+﻿# Slack sources
+
+Add a Slack source in Settings → Sources, enter the workspace URL and channel ID from Slack channel details, choose a start date, enable processing, and save. Each source indexes one channel through the shared Bifrost connection. New sources start paused. Existing settings files remain compatible.
+
+The importer uses only `slack_list_user_channels`, `slack_read_channel`, `slack_read_thread`, and `slack_read_file`; no Slack write tools are callable. It reads channel history and all paginated replies for parent messages posted in the configured date range. Older parent threads are outside the scope even if they have new replies.
+
+The deployed Bifrost connector returns formatted transcripts, not raw Slack message objects. The importer validates message timestamps, expected boundaries, and continuation cursors. Unrecognized responses fail without advancing the page. A page publishes atomically after its threads finish. Five history pages are processed per worker pass, with a persisted continuation cursor; very large threads have a 100-page safety limit. Every completed polling cycle rechecks the date range to find edits and replies. Use a narrow start date for busy channels to keep connector traffic manageable.
+
+Messages and replies use stable internal URIs, local text chunks, and the existing lexical/semantic search pipeline. Search and preview open the original Slack message. The transcript includes author and posted time; it does not claim a modification timestamp because the connector omits one. Deleted messages and lost access retain their last indexed copy; removing the source removes its local records.
+
+PNG, JPEG, and WebP file attachments returned by Bifrost are cached locally, linked to their parent message, and processed by the existing OpenAI image text/description indexer. Limits are 10 MiB and 20 megapixels. Image responses support MCP image blocks and the connector's inline base64 image response. Unsupported formats are not downloaded. Download failures remain visible in source status and are retried; already published message text remains searchable. Image indexing can be disabled per Slack source. The shared OpenAI key and model are configured in Processing.
+
+Tests cover transcript parsing, thread pagination, cursor replay protection, page failure recovery, edits, cancellation, image caching and extraction, parent links, and source filters. `bifrost-check slack-smoke <new-directory> <channel-id> <workspace-url> <YYYY-MM-DD>` performs a bounded live sync into an isolated local database and reports only message/image counts; it does not add a production source or call OpenAI.

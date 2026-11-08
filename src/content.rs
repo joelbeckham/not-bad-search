@@ -169,12 +169,13 @@ pub(crate) fn search_content(
     hits: &mut Vec<Hit>,
     filters: crate::SearchFilters,
 ) -> Result<()> {
-    if hits.len() >= limit || !terms.iter().any(|s| s.chars().any(char::is_alphanumeric)) {
+    if (!filters.sort.by_date() && hits.len() >= limit) || !terms.iter().any(|s| s.chars().any(char::is_alphanumeric)) {
         return Ok(());
     }
     // AND literal terms and quoted phrases; never expose raw FTS syntax.
     let pattern = crate::query::fts(terms);
-    let mut stmt = db.prepare("SELECT f.path,f.name,snippet(chunk_search,1,'[',']',' ... ',24),c.start_line,d.kind FROM chunk_search JOIN chunks c ON c.id=chunk_search.rowid JOIN documents d ON d.id=c.document_id JOIN files f ON f.id=d.file_id WHERE chunk_search MATCH ?1 AND ((d.kind='text' AND ?2) OR (d.kind IN ('image_text','image_description') AND ?3)) AND (?4='null' OR f.root IN (SELECT value FROM json_each(?4))) ORDER BY rank LIMIT 1000")?;
+    let date_order=if filters.sort.by_date() { format!(" ORDER BY {}",filters.sort.sql_order()) } else { " ORDER BY rank LIMIT 1000".into() };
+    let mut stmt = db.prepare(&format!("SELECT f.path,f.name,snippet(chunk_search,1,'[',']',' ... ',24),c.start_line,d.kind,(SELECT timestamp FROM result_dates WHERE file_id=f.id) AS sort_date FROM chunk_search JOIN chunks c ON c.id=chunk_search.rowid JOIN documents d ON d.id=c.document_id JOIN files f ON f.id=d.file_id WHERE chunk_search MATCH ?1 AND ((d.kind='text' AND ?2) OR (d.kind IN ('image_text','image_description') AND ?3)) AND (?4='null' OR f.root IN (SELECT value FROM json_each(?4))){date_order}"))?;
     let mut rows = stmt.query(params![
         pattern,
         filters.text,
@@ -182,6 +183,7 @@ pub(crate) fn search_content(
         serde_json::to_string(&filters.roots)?
     ])?;
     let mut seen: HashSet<String> = hits.iter().map(|h| h.path.clone()).collect();
+    let initial_count=hits.len();
     while let Some(row) = rows.next()? {
         let path: String = row.get(0)?;
         if seen.insert(path.clone()) {
@@ -195,7 +197,7 @@ pub(crate) fn search_content(
             };
             hits.push(Hit {
                 original_url: None,
-                jira: None,
+                jira: None, timestamp: None, slack: false,
                 path,
                 name: row.get(1)?,
                 snippet: Some(format!(
@@ -203,7 +205,7 @@ pub(crate) fn search_content(
                     excerpt.split_whitespace().collect::<Vec<_>>().join(" ")
                 )),
             });
-            if hits.len() >= limit {
+            if hits.len() >= if filters.sort.by_date() {initial_count+limit} else {limit} {
                 break;
             }
         }

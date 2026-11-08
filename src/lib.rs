@@ -76,7 +76,9 @@ impl Config {
                 bail!("Give each source a name");
             }
             self.source_matcher(&source.path)?;
-            if !source.is_folder() {
+            if source.kind == sources::SourceKind::Slack {
+                source.slack.as_ref().context("Slack source needs settings")?.validate()?;
+            } else if !source.is_folder() {
                 source
                     .jira
                     .as_ref()
@@ -133,21 +135,27 @@ impl Config {
 
 #[derive(Clone, Debug)]
 pub struct Hit {
+    pub timestamp: Option<i64>,
     pub original_url: Option<String>,
     pub jira: Option<jira::Metadata>,
+    pub slack: bool,
     pub path: String,
     pub name: String,
     pub snippet: Option<String>,
 }
 impl Hit {
+    pub fn open_label(&self) -> &str { if self.slack { "Open in Slack" } else if self.original_url.is_some() { "Open in Jira" } else { "Open file" } }
     pub fn location(&self) -> &str {
         self.original_url.as_deref().unwrap_or(&self.path)
     }
 }
 pub(crate) fn remote_locations(db: &Connection, hits: &mut [Hit]) -> Result<()> {
+    for hit in hits.iter_mut() {
+        hit.timestamp = db.query_row("SELECT d.timestamp FROM result_dates d JOIN files f ON f.id=d.file_id WHERE f.path=?1",[&hit.path],|r|r.get(0))?;
+    }
     for hit in hits
         .iter_mut()
-        .filter(|h| h.path.starts_with("good-search://jira/"))
+        .filter(|h| h.path.starts_with("good-search://"))
     {
         hit.original_url=Some(db.query_row("SELECT original_url FROM remote_items r JOIN files f ON f.id=r.file_id WHERE f.path=?1",[&hit.path],|r|r.get(0))?);
     }
@@ -155,13 +163,16 @@ pub(crate) fn remote_locations(db: &Connection, hits: &mut [Hit]) -> Result<()> 
         hit.original_url=db.query_row("SELECT r.original_url FROM attachments a JOIN remote_items r ON r.file_id=a.parent_file_id JOIN files f ON f.id=a.file_id WHERE f.path=?1",[&hit.path],|r|r.get(0)).optional()?;
     }
     for hit in hits.iter_mut().filter(|h| h.original_url.is_some()) {
-        hit.jira = jira::metadata(db, &hit.path)?;
+        hit.slack = db.query_row("SELECT r.content_format='slack' FROM files f LEFT JOIN attachments a ON a.file_id=f.id JOIN remote_items r ON r.file_id=coalesce(a.parent_file_id,f.id) WHERE f.path=?1",[&hit.path],|r|r.get(0))?;
+        if !hit.slack { hit.jira = jira::metadata(db, &hit.path)?; }
     }
     Ok(())
 }
 
 pub mod filters;
+pub mod sorting;
 pub mod attachments;
+pub mod slack;
 pub use filters::SearchFilters;
 pub fn search(db: &Connection, query: &str, limit: usize) -> Result<Vec<Hit>> {
     search_filtered(db, query, limit, SearchFilters::default())
@@ -213,7 +224,7 @@ pub fn search_filtered(
     filters.push(format!(
         "(?{root_param}='null' OR f.root IN (SELECT value FROM json_each(?{root_param})))"
     ));
-    let image = "(f.path NOT LIKE 'good-search://jira/%' AND (EXISTS(SELECT 1 FROM attachments a WHERE a.file_id=f.id) OR EXISTS(SELECT 1 FROM documents d WHERE d.file_id=f.id AND d.kind IN ('image_text','image_description')) OR lower(f.name) GLOB '*.png' OR lower(f.name) GLOB '*.jpg' OR lower(f.name) GLOB '*.jpeg' OR lower(f.name) GLOB '*.webp' OR lower(f.name) GLOB '*.gif' OR lower(f.name) GLOB '*.bmp' OR lower(f.name) GLOB '*.tif' OR lower(f.name) GLOB '*.tiff' OR lower(f.name) GLOB '*.svg' OR lower(f.name) GLOB '*.avif'))";
+    let image = "(f.path NOT LIKE 'good-search://%' AND (EXISTS(SELECT 1 FROM attachments a WHERE a.file_id=f.id) OR EXISTS(SELECT 1 FROM documents d WHERE d.file_id=f.id AND d.kind IN ('image_text','image_description')) OR lower(f.name) GLOB '*.png' OR lower(f.name) GLOB '*.jpg' OR lower(f.name) GLOB '*.jpeg' OR lower(f.name) GLOB '*.webp' OR lower(f.name) GLOB '*.gif' OR lower(f.name) GLOB '*.bmp' OR lower(f.name) GLOB '*.tif' OR lower(f.name) GLOB '*.tiff' OR lower(f.name) GLOB '*.svg' OR lower(f.name) GLOB '*.avif'))";
     if !options.images {
         filters.push(format!("NOT {image}"));
     }
@@ -223,30 +234,34 @@ pub fn search_filtered(
     values.push(q.into());
     let exact = values.len();
     values.push((limit.min(200) as i64).into());
-    let order = if terms.len() == 1 && long.is_empty() {
+    let order = if options.sort.by_date() { options.sort.sql_order().to_owned() } else if terms.len() == 1 && long.is_empty() {
         "folded COLLATE NOCASE".to_owned()
     } else {
         format!("(folded=?{exact}) DESC,length(name),path")
     };
-    let candidate_order = if terms.len() == 1 && long.is_empty() {
+    let date_order = format!(" ORDER BY {}", options.sort.sql_order());
+    let candidate_order = if options.sort.by_date() { date_order.as_str() } else if terms.len() == 1 && long.is_empty() {
         " ORDER BY f.folded COLLATE NOCASE"
     } else {
         ""
     };
-    let sql = format!("WITH candidates AS MATERIALIZED (SELECT f.path,f.name,f.folded FROM {from} WHERE {}{candidate_order} LIMIT 1000) SELECT path,name FROM candidates ORDER BY {order} LIMIT ?{}",filters.join(" AND "),values.len());
+    let sql = format!("WITH candidates AS MATERIALIZED (SELECT f.path,f.name,f.folded,(SELECT timestamp FROM result_dates WHERE file_id=f.id) AS sort_date FROM {from} WHERE {}{candidate_order} LIMIT 1000) SELECT path,name FROM candidates ORDER BY {order} LIMIT ?{}",filters.join(" AND "),values.len());
     let mut stmt = db.prepare(&sql)?;
     let rows = stmt.query_map(rusqlite::params_from_iter(values), |r| {
         Ok(Hit {
             original_url: None,
-            jira: None,
+            jira: None, timestamp: None, slack: false,
             path: r.get(0)?,
             name: r.get(1)?,
             snippet: None,
         })
     })?;
     let mut hits: Vec<Hit> = rows.collect::<rusqlite::Result<_>>()?;
+    let sort=options.sort;
     content::search_content(db, &terms, limit.min(200), &mut hits, options)?;
     remote_locations(db, &mut hits)?;
+    if sort.by_date() { sorting::sort(&mut hits, query, sort, chrono::Utc::now().timestamp()); }
+    hits.truncate(limit.min(200));
     Ok(hits)
 }
 
@@ -319,16 +334,18 @@ pub fn reconcile(db: &mut Connection, config: &Config) -> Result<Vec<String>> {
                     .file_name()
                     .to_str()
                     .context("Filename is not valid Unicode")?;
-                snapshot.push((path.to_owned(), name.to_owned()));
+                let modified=entry.metadata().ok().and_then(|m|m.modified().ok()).and_then(|t|t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d|d.as_secs() as i64);
+                snapshot.push((path.to_owned(), name.to_owned(), modified));
             }
             let tx = db.transaction()?;
             tx.execute_batch(
                 "CREATE TEMP TABLE IF NOT EXISTS seen(path TEXT PRIMARY KEY); DELETE FROM seen;",
             )?;
-            for (path, name) in &snapshot {
+            for (path, name, modified) in &snapshot {
                 tx.prepare_cached("INSERT INTO seen VALUES(?1)")?
                     .execute([path])?;
                 tx.prepare_cached("INSERT INTO files(root,path,name,folded) VALUES(?1,?2,?3,?4) ON CONFLICT(path) DO UPDATE SET root=excluded.root,name=excluded.name,folded=excluded.folded WHERE files.root != excluded.root OR files.name != excluded.name")?.execute(params![root.to_string_lossy(),path,name,name.to_lowercase()])?;
+                tx.execute("INSERT INTO file_times(file_id,modified) SELECT id,?2 FROM files WHERE path=?1 ON CONFLICT(file_id) DO UPDATE SET modified=excluded.modified WHERE modified IS NOT excluded.modified",params![path,modified])?;
             }
             tx.execute(
                 "DELETE FROM files WHERE root=?1 AND path NOT IN (SELECT path FROM seen)",

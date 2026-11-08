@@ -199,6 +199,20 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    if args.get(1).is_some_and(|s| s == "slack-smoke") {
+        let dir=std::path::Path::new(args.get(2).context("New fixture directory required")?);
+        anyhow::ensure!(!dir.exists(),"Fixture directory already exists");
+        std::fs::create_dir_all(dir)?;
+        let settings=good_search::slack::Settings {channel:args.get(3).context("Channel required")?.clone(),workspace:args.get(4).context("Workspace URL required")?.clone(),since:args.get(5).context("Start date required")?.clone(),poll_seconds:300};
+        let mut db=good_search::open_db(&dir.join("index.sqlite"))?;
+        let outcome=good_search::slack::sync(&mut db,"slack-smoke",&settings,&mut m,||false)?;
+        good_search::slack::sync_images(&mut db,"slack-smoke",&mut m,&dir.join("attachments"),||false)?;
+        let counts:(i64,i64)=db.query_row("SELECT (SELECT count(*) FROM remote_items),(SELECT count(*) FROM attachments)",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
+        println!("Slack sync {outcome:?}; {} messages, {} cached images",counts.0,counts.1);
+        return Ok(());
+    }
+    if args.get(1).is_some_and(|s| s == "slack-probe") { let tool=args.get(2).context("Read tool required")?; let arguments=serde_json::from_str(args.get(3).context("JSON arguments required")?)?; println!("{}",serde_json::to_string_pretty(&m.slack_read(tool,arguments)?)?); return Ok(()); }
+    if args.get(1).is_some_and(|s| s == "slack-catalog") { println!("{}", serde_json::to_string_pretty(&m.v2_catalog().as_object().unwrap().iter().filter(|(k,_)| k.to_lowercase().contains("slack")).map(|(k,v)|(k.clone(),v.clone())).collect::<serde_json::Map<_,_>>())?); return Ok(()); }
     if args.get(1).is_some_and(|s| s == "v2-catalog") {
         println!(
             "{}",

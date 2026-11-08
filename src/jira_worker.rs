@@ -45,9 +45,7 @@ pub(super) fn start(
                     .iter()
                     .filter(|s| !s.is_folder() && !s.paused)
                 {
-                    let Some(settings) = &source.jira else {
-                        continue;
-                    };
+                    let poll_seconds = source.slack.as_ref().map(|s|s.poll_seconds).or_else(||source.jira.as_ref().map(|s|s.poll_seconds)).unwrap_or(300);
                     db.execute("INSERT INTO remote_sync(source_id,scope_hash) VALUES(?1,'') ON CONFLICT DO NOTHING",[&source.id])?;
                     let (last,retry,pending):(Option<String>,i64,bool)=db.query_row("SELECT last_success,retry_at,run_id IS NOT NULL FROM remote_sync WHERE source_id=?1",[&source.id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
                     let due = last
@@ -55,12 +53,12 @@ pub(super) fn start(
                         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
                         .is_none_or(|last| {
                             chrono::Utc::now().timestamp() - last.timestamp()
-                                >= settings.poll_seconds as i64
+                                >= poll_seconds as i64
                         });
                     if !manual && (retry > chrono::Utc::now().timestamp() || (!due && !pending)) {
                         continue;
                     }
-                    let expected = serde_json::to_string(settings)?;
+                    let expected = serde_json::to_string(source)?;
                     let cancel = || {
                         config
                             .lock()
@@ -69,15 +67,20 @@ pub(super) fn start(
                             .iter()
                             .find(|s| s.id == source.id)
                             .is_none_or(|s| {
-                                s.paused
-                                    || s.jira
-                                        .as_ref()
-                                        .and_then(|j| serde_json::to_string(j).ok())
-                                        .as_deref()
-                                        != Some(expected.as_str())
+                                s.paused || serde_json::to_string(s).ok().as_deref() != Some(expected.as_str())
                             })
                     };
                     let result = (|| -> anyhow::Result<Outcome> {
+                        if let Some(settings) = &source.slack {
+                            let mut client = Mcp::connect_discovery(Connection::load()?)?;
+                            let outcome=good_search::slack::sync(&mut db,&source.id,settings,&mut client,cancel)?;
+                            if source.images && !cancel() {
+                                good_search::slack::sync_images(&mut db,&source.id,&mut client,&path.parent().unwrap().join("attachments"),cancel)?;
+                                good_search::images::discover(&mut db,&config.lock().unwrap().clone())?;
+                            }
+                            return Ok(outcome);
+                        }
+                        let settings=source.jira.as_ref().ok_or_else(||anyhow::anyhow!("Missing source settings"))?;
                         let mut client = Mcp::connect(Connection::load()?)?;
                         if manual {
                             db.execute("DELETE FROM attachment_scans WHERE parent_file_id IN (SELECT file_id FROM remote_items WHERE source_id=?1)",[&source.id])?;
@@ -114,7 +117,7 @@ pub(super) fn start(
         };
         if let Err(e) = run() {
             let _ = events.send(Event::RemoteStatus(
-                format!("Jira sync worker stopped: {e:#}"),
+                format!("Remote sync worker stopped: {e:#}"),
                 false,
             ));
             ctx.request_repaint();
