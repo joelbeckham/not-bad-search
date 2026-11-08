@@ -68,6 +68,7 @@ struct App {
     query: String,
     hits: Vec<Hit>,
     selected: usize,
+    selection_started: bool,
     generation: u64,
     elapsed: Duration,
     pending: Arc<Mutex<Option<(u64, String, SearchFilters)>>>,
@@ -278,7 +279,7 @@ fn run() -> Result<()> {
         instance.attach(window)?;
         platform::center_window(window);
         let (hotkey,error)=match platform::Hotkey::register(cc.egui_ctx.clone(),window) {Ok(h)=>(Some(h),String::new()),Err(e)=>(None,e.to_string())};
-        Ok(Box::new(App {remote_wake,source_settings:settings_ui::State::default(),background_refresh:false,index_error:String::new(),filters:SearchFilters::default(),source_selection:Default::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.sources.is_empty(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
+        Ok(Box::new(App {remote_wake,source_settings:settings_ui::State::default(),background_refresh:false,index_error:String::new(),filters:SearchFilters::default(),source_selection:Default::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.sources.is_empty(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,selection_started:false,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
     })).map_err(|e|anyhow::anyhow!(e.to_string()))?;
     Ok(())
 }
@@ -304,19 +305,22 @@ impl App {
     }
 
     fn refresh(&mut self) {
+        let selected = self.selected;
+        let selection_started = self.selection_started;
         self.submit();
+        self.selected = selected;
+        self.selection_started = selection_started;
         self.background_refresh = !self.query.trim().is_empty();
     }
     fn publish_hits(&mut self, hits: Vec<Hit>) {
-        let selected = self.hits.get(self.selected).map(|h| h.path.clone());
+        self.selected = updated_selection(&self.hits, &hits, self.selected, self.selection_started);
         self.hits = hits;
-        self.selected = selected
-            .and_then(|p| self.hits.iter().position(|h| h.path == p))
-            .unwrap_or(0);
         self.background_refresh = false;
         self.trace_results = true;
     }
     fn submit(&mut self) {
+        self.selection_started = false;
+        self.selected = 0;
         self.filters.roots = self.source_selection.roots(&self.config.sources);
         self.background_refresh = false;
         self.semantic.cancel();
@@ -381,6 +385,26 @@ impl App {
         let _ = self.remote_wake.try_send(());
         self.submit();
         Ok(())
+    }
+}
+fn updated_selection(old: &[Hit], new: &[Hit], index: usize, started: bool) -> usize {
+    if !started { return 0; }
+    old.get(index).and_then(|selected| new.iter().position(|hit| hit.path == selected.path)).unwrap_or(0)
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    #[test]
+    fn reranking_preserves_only_intentional_selection() {
+        let hit = |path: &str| Hit { path: path.into(), name: path.into(), snippet: None, original_url: None, jira: None };
+        let old = vec![hit("a"), hit("b")];
+        let new = vec![hit("b"), hit("c"), hit("a")];
+        assert_eq!(updated_selection(&old, &new, 0, false), 0);
+        assert_eq!(updated_selection(&old, &new, 0, true), 2);
+        assert_eq!(updated_selection(&old, &new, 1, true), 0);
+        assert_eq!(updated_selection(&old, &[], 0, true), 0);
+        assert_eq!(updated_selection(&old, &[hit("c")], 0, true), 0);
     }
 }
 impl eframe::App for App {

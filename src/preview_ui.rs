@@ -78,6 +78,7 @@ impl App {
         let Some(hit) = self.hits.get(self.selected) else {
             return;
         };
+        self.selection_started = true;
         let loader = self.preview_loader.get_or_insert_with(|| {
             Loader::new(ctx.clone(), self.config_path.with_file_name("index.sqlite"))
         });

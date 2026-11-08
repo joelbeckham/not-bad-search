@@ -275,10 +275,12 @@ impl App {
                     i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::ArrowUp)
                 });
                 if !egui::Popup::is_any_open(&ctx) && self.inspector.is_none() && ctx.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-                    self.selected = (self.selected + 1).min(self.hits.len().saturating_sub(1));
+                    self.selected = if self.selection_started { (self.selected + 1).min(self.hits.len().saturating_sub(1)) } else { 0 };
+                    self.selection_started = !self.hits.is_empty();
                 }
                 if !egui::Popup::is_any_open(&ctx) && self.inspector.is_none() && ctx.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
                     self.selected = self.selected.saturating_sub(1);
+                    self.selection_started = !self.hits.is_empty();
                 }
                 let mut open = None;
                 let mut inspect = None;
@@ -354,15 +356,16 @@ impl App {
                                 FontId::proportional(10.),
                                 MUTED,
                             );
-                            if response.secondary_clicked() { self.selected=index; }
+                            if response.secondary_clicked() { self.selected=index; self.selection_started=true; }
                             response.context_menu(|ui| {
-                                if ui.button("Preview").clicked() { self.selected=index; preview=true;ui.close(); }
+                                if ui.button("Preview").clicked() { self.selected=index; self.selection_started=true; preview=true;ui.close(); }
                                 if ui.button("Inspect indexed data").clicked() {inspect=Some(hit.path.clone());ui.close();}
                                 if ui.button(if hit.original_url.is_some() {"Copy link"} else {"Copy path"}).clicked() {ctx.copy_text(hit.location().to_owned());ui.close();}
                                 if ui.button(if hit.original_url.is_some() {"Open in Jira"} else {"Open file"}).clicked() {open=Some(hit.path.clone());ui.close();}
                             });
                             if response.clicked() {
                                 self.selected = index;
+                                self.selection_started = true;
                                 preview = true;
                             }
                             if moved && selected {
