@@ -173,6 +173,7 @@ pub mod filters;
 pub mod sorting;
 pub mod attachments;
 pub mod slack;
+pub mod slack_display;
 pub use filters::SearchFilters;
 pub fn search(db: &Connection, query: &str, limit: usize) -> Result<Vec<Hit>> {
     search_filtered(db, query, limit, SearchFilters::default())

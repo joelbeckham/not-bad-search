@@ -203,7 +203,7 @@ fn main() -> Result<()> {
         let dir=std::path::Path::new(args.get(2).context("New fixture directory required")?);
         anyhow::ensure!(!dir.exists(),"Fixture directory already exists");
         std::fs::create_dir_all(dir)?;
-        let settings=good_search::slack::Settings {channel:args.get(3).context("Channel required")?.clone(),workspace:args.get(4).context("Workspace URL required")?.clone(),since:args.get(5).context("Start date required")?.clone(),poll_seconds:300};
+        let settings=good_search::slack::Settings {channel:args.get(3).context("Channel required")?.clone(),workspace:args.get(4).context("Workspace URL required")?.clone(),since:args.get(5).context("Start date required")?.clone(),poll_seconds:300,..Default::default()};
         let mut db=good_search::open_db(&dir.join("index.sqlite"))?;
         let outcome=good_search::slack::sync(&mut db,"slack-smoke",&settings,&mut m,||false)?;
         good_search::slack::sync_images(&mut db,"slack-smoke",&mut m,&dir.join("attachments"),||false)?;

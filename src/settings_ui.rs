@@ -39,11 +39,25 @@ impl App {
         ui.label("Workspace URL"); ui.text_edit_singleline(&mut settings.workspace);
         ui.label("Channel ID"); ui.text_edit_singleline(&mut settings.channel);
         ui.weak("Copy the channel ID from Slack channel details. Add a source for each channel.");
-        ui.label("Include messages posted since (YYYY-MM-DD)"); ui.text_edit_singleline(&mut settings.since);
+        ui.label("History start date (YYYY-MM-DD, UTC)"); ui.text_edit_singleline(&mut settings.since);
+        ui.weak("The initial import includes messages posted on or after this date and their thread replies.");
+        ui.horizontal(|ui| {
+            ui.label("Update cutoff: recheck the last");
+            ui.add(egui::DragValue::new(&mut settings.update_lookback_days).range(1..=36500).suffix(" days"));
+        });
+        if let Ok(cutoff)=good_search::slack::scan_start(settings,Some(chrono::Utc::now().timestamp()),chrono::Utc::now().timestamp()) {
+            if let Some(date)=chrono::DateTime::from_timestamp(cutoff,0) {
+                ui.weak(format!("Current update cutoff: {} UTC. Older indexed messages remain searchable.",date.format("%Y-%m-%d")));
+            }
+        }
+        ui.weak("After the initial import, checks edits and replies only for parent messages posted within this window. A longer offline gap is caught up automatically. Changes apply to the next sync cycle.");
+        if ui.button("Recheck full history on next save").clicked() {
+            settings.reload_generation=settings.reload_generation.saturating_add(1);
+        }
         ui.horizontal(|ui| {ui.label("Poll every"); ui.add(egui::DragValue::new(&mut settings.poll_seconds).range(30..=86400).suffix(" seconds"));});
         ui.checkbox(&mut source.images,"Index shared images: text and descriptions");
         ui.weak("Images use the OpenAI settings in Processing. PNG, JPEG and WebP up to 10 MiB are supported.");
-        ui.weak("Includes replies to messages in the date range. Rechecks the range for edits and new replies. Deleted messages and lost access retain the last local copy until the source is removed.");
+        ui.weak("Replies to parents older than the update cutoff are not checked again unless you recheck full history. Deleted messages and lost access retain the last local copy until the source is removed.");
         ui.horizontal(|ui| {
             if ui.button("Sync enabled sources now").clicked() {let _=self.remote_wake.try_send(()); self.source_settings.checked=None;}
             if ui.button("Remove source").clicked() {self.config.sources.remove(index);self.source_settings.selected=None;}

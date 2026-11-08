@@ -1,0 +1,1 @@
+﻿Emoji aliases are bundled from https://github.com/github/gemoji (db/emoji.json), downloaded 2026-11-08. See LICENSE in this directory. The app uses this data locally; no runtime emoji service is called. Workspace-specific image emoji are not included.

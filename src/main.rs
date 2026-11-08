@@ -210,6 +210,7 @@ fn run() -> Result<()> {
         let proportional = fonts.families.entry(egui::FontFamily::Proportional).or_default();
         proportional.insert(0, "DM Sans".into());
         fonts.families.entry(egui::FontFamily::Monospace).or_default().push("DM Sans".into());
+        good_search::slack_display::add_emoji_font(&mut fonts);
         cc.egui_ctx.set_fonts(fonts);
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         egui_extras::install_image_loaders(&cc.egui_ctx);
@@ -315,6 +316,7 @@ impl App {
     fn publish_hits(&mut self, mut hits: Vec<Hit>) {
         good_search::sorting::sort(&mut hits, &self.query, self.filters.sort, chrono::Utc::now().timestamp());
         hits.truncate(100);
+        for hit in &mut hits { good_search::slack_display::decorate(hit,&self.config.sources); }
         self.selected = updated_selection(&self.hits, &hits, self.selected, self.selection_started);
         self.hits = hits;
         self.background_refresh = false;

@@ -3,7 +3,7 @@ use eframe::egui::{self, Color32, RichText};
 use good_search::{preview::Content, Hit};
 use std::sync::{mpsc, Arc, Mutex};
 
-type Request = (u64, String, String);
+type Request = (u64, String, String, Option<String>);
 type Reply = (u64, Result<Content, String>);
 
 /// One worker per app, with one replaceable pending request and one result slot.
@@ -25,12 +25,13 @@ impl Loader {
             let _ = crate::platform::background_priority();
             while rx.recv().is_ok() {
                 let request = work.lock().unwrap().take();
-                if let Some((id, path, query)) = request {
+                if let Some((id, path, query, channel)) = request {
                     let result = (|| -> anyhow::Result<Content> {
                         if path.starts_with("good-search://") {
                             let db=good_search::open_reader(&database)?;
                             let (text,warnings):(String,String)=db.query_row("SELECT searchable_text,warnings FROM remote_items r JOIN files f ON f.id=r.file_id WHERE f.path=?1",[&path],|r|Ok((r.get(0)?,r.get(1)?)))?;
                             let text=if warnings!="[]"{format!("{text}\n\nIndexing notes: {warnings}")}else{text};
+                            let text=if path.starts_with("good-search://slack/") {good_search::slack_display::preview(&text,channel.as_deref())} else {text};
                             Ok(good_search::preview::text_preview(&text,&query,false))
                         }else {good_search::preview::load(std::path::Path::new(&path), &query)}
                     })()
@@ -48,10 +49,10 @@ impl Loader {
         }
     }
 
-    fn request(&mut self, path: String, query: String) -> u64 {
+    fn request(&mut self, path: String, query: String, channel: Option<String>) -> u64 {
         self.generation += 1;
         *self.reply.lock().unwrap() = None;
-        *self.pending.lock().unwrap() = Some((self.generation, path, query));
+        *self.pending.lock().unwrap() = Some((self.generation, path, query, channel));
         let _ = self.wake.try_send(());
         self.generation
     }
@@ -82,7 +83,7 @@ impl App {
         let loader = self.preview_loader.get_or_insert_with(|| {
             Loader::new(ctx.clone(), self.config_path.with_file_name("index.sqlite"))
         });
-        let request = loader.request(hit.path.clone(), self.query.clone());
+        let request = loader.request(hit.path.clone(), self.query.clone(), good_search::slack_display::channel_name(hit,&self.config.sources));
         self.preview = Some(Preview {
             items: self.hits.clone(),
             selected: self.selected,
@@ -144,7 +145,7 @@ impl App {
         });
         let hit = &preview.items[preview.selected];
         if previous != preview.selected {
-            preview.request = loader.request(hit.path.clone(), self.query.clone());
+            preview.request = loader.request(hit.path.clone(), self.query.clone(), good_search::slack_display::channel_name(hit,&self.config.sources));
             preview.content = None;
             preview.texture = None;
             preview.initial_scroll = true;

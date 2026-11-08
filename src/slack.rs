@@ -12,11 +12,13 @@ pub struct Settings {
     pub channel: String,
     pub workspace: String,
     pub since: String,
+    pub update_lookback_days: u32,
+    pub reload_generation: u64,
     pub poll_seconds: u64,
 }
 impl Default for Settings {
     fn default() -> Self {
-        Self { channel: String::new(), workspace: String::new(), since: (chrono::Utc::now()-chrono::Duration::days(30)).format("%Y-%m-%d").to_string(), poll_seconds: 300 }
+        Self { channel: String::new(), workspace: String::new(), since: (chrono::Utc::now()-chrono::Duration::days(30)).format("%Y-%m-%d").to_string(), poll_seconds: 300, update_lookback_days: 30, reload_generation: 0 }
     }
 }
 impl Settings {
@@ -25,6 +27,7 @@ impl Settings {
         let url=reqwest::Url::parse(&self.workspace)?;
         ensure!(url.scheme()=="https" && url.host_str().is_some_and(|h|h.ends_with(".slack.com")) && url.path()=="/" && url.username().is_empty() && url.password().is_none() && url.query().is_none() && url.fragment().is_none(), "Enter the workspace URL, e.g. https://your-team.slack.com");
         chrono::NaiveDate::parse_from_str(&self.since,"%Y-%m-%d").context("Start date must be YYYY-MM-DD")?;
+        ensure!((1..=36500).contains(&self.update_lookback_days), "Update lookback must be 1–36500 days");
         ensure!((30..=86400).contains(&self.poll_seconds), "Poll interval must be 30–86400 seconds");
         Ok(())
     }
@@ -109,13 +112,18 @@ pub fn image_data(raw: &Value) -> Result<(Vec<u8>, &'static str)> {
 pub fn sync(db: &mut Connection, source: &str, s: &Settings, provider: &mut impl Provider, cancel: impl Fn()->bool) -> Result<crate::jira::Outcome> {
     use crate::jira::{now,Outcome};
     s.validate()?;
-    let scope=blake3::hash(serde_json::to_string(s)?.as_bytes()).to_hex().to_string();
+    // Poll frequency and rolling lookback do not invalidate the history import.
+    let scope=blake3::hash(serde_json::to_string(&json!(["slack-incremental-v1",s.channel,s.workspace,s.since,s.reload_generation]))?.as_bytes()).to_hex().to_string();
     db.execute("INSERT INTO remote_sync(source_id,scope_hash) VALUES(?1,?2) ON CONFLICT DO NOTHING",params![source,scope])?;
-    db.execute("UPDATE remote_sync SET scope_hash=?2,run_id=NULL,next_token=NULL,last_success=NULL WHERE source_id=?1 AND scope_hash!=?2",params![source,scope])?;
+    db.execute("UPDATE remote_sync SET scope_hash=?2,run_id=NULL,next_token=NULL,last_success=NULL,checkpoint=NULL,candidate=NULL WHERE source_id=?1 AND scope_hash!=?2",params![source,scope])?;
     let started=now();
-    db.execute("UPDATE remote_sync SET run_id=?2,run_jql=?3,next_token=NULL,pages=0,items=0 WHERE source_id=?1 AND run_id IS NULL",params![source,started,chrono::Utc::now().timestamp().to_string()])?;
-    let (run,latest,mut cursor):(String,String,Option<String>)=db.query_row("SELECT run_id,run_jql,next_token FROM remote_sync WHERE source_id=?1",[source],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
-    let oldest=chrono::NaiveDate::parse_from_str(&s.since,"%Y-%m-%d")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp().to_string();
+    let checkpoint:Option<String>=db.query_row("SELECT checkpoint FROM remote_sync WHERE source_id=?1",[source],|r|r.get(0))?;
+    let latest_time=chrono::Utc::now().timestamp();
+    let lower=scan_start(s,checkpoint.as_deref().map(str::parse::<i64>).transpose()?,latest_time)?;
+    // Pin both bounds for all pages/retries. Downtime expands the window back to
+    // the previous completed scan, so new messages cannot fall through a gap.
+    db.execute("UPDATE remote_sync SET run_id=?2,run_jql=?3,candidate=?4,next_token=NULL,pages=0,items=0 WHERE source_id=?1 AND run_id IS NULL",params![source,started,latest_time.to_string(),lower.to_string()])?;
+    let (run,latest,oldest,mut cursor):(String,String,String,Option<String>)=db.query_row("SELECT run_id,run_jql,candidate,next_token FROM remote_sync WHERE source_id=?1",[source],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
     let mut seen=std::collections::HashSet::new();
     if let Some(c)=&cursor {seen.insert(c.clone());}
     for _ in 0..5 {
@@ -143,12 +151,16 @@ pub fn sync(db: &mut Connection, source: &str, s: &Settings, provider: &mut impl
         let tx=db.transaction()?;
         for m in &page.messages {publish(&tx,source,s,&run,&scope,m)?;}
         tx.execute("UPDATE remote_sync SET next_token=?2,pages=pages+1,items=items+?3,error='',failures=0,retry_at=0,last_attempt=?4 WHERE source_id=?1",params![source,page.next,page.messages.len() as i64,now()])?;
-        if page.next.is_none() {tx.execute("UPDATE remote_sync SET run_id=NULL,last_success=?2 WHERE source_id=?1",params![source,now()])?;}
+        if page.next.is_none() {tx.execute("UPDATE remote_sync SET run_id=NULL,last_success=?2,checkpoint=run_jql WHERE source_id=?1",params![source,now()])?;}
         tx.commit()?;
         if page.next.is_none() {return Ok(Outcome::Complete);}
         cursor=page.next;
     }
     Ok(Outcome::More)
+}
+pub fn scan_start(s:&Settings,checkpoint:Option<i64>,now:i64)->Result<i64> {
+    let history=chrono::NaiveDate::parse_from_str(&s.since,"%Y-%m-%d")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp();
+    Ok(checkpoint.map_or(history,|last| history.max(last.saturating_sub(1).min(now.saturating_sub(i64::from(s.update_lookback_days)*86400)))))
 }
 fn publish(db:&Connection,source:&str,s:&Settings,run:&str,scope:&str,m:&Message)->Result<()> {
     use rusqlite::OptionalExtension;

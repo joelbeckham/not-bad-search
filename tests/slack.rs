@@ -4,7 +4,7 @@ use serde_json::{json,Value};
 use std::collections::VecDeque;
 fn envelope(body:&str,next:Option<&str>)->Value {json!({"content":[{"type":"text","text":serde_json::to_string(&json!({"messages":body,"pagination_info":next.map(|c|format!("More messages. Use cursor: `{c}`")).unwrap_or_else(||"There are no more messages available.\\n".into())})).unwrap()}]})}
 fn message(ts:&str,body:&str)->String {format!("=== Message from Tester (U123) at today ===\nMessage TS: {ts}\n{body}")}
-fn settings()->Settings {Settings{channel:"C12345678".into(),workspace:"https://example.slack.com".into(),since:"2026-01-01".into(),poll_seconds:300}}
+fn settings()->Settings {Settings{channel:"C12345678".into(),workspace:"https://example.slack.com".into(),since:"2026-01-01".into(),poll_seconds:300,..Default::default()}}
 struct Fake(VecDeque<(&'static str,Value)>);
 impl Provider for Fake {fn read(&mut self,tool:&str,args:Value)->Result<Value>{if tool=="slack_read_thread" {assert!(args.get("latest").is_none());}let (expected,v)=self.0.pop_front().expect("unexpected read"); assert_eq!(tool,expected); if v.is_null(){anyhow::bail!("temporary error")} Ok(v)}}
 #[test]
@@ -65,5 +65,56 @@ fn malformed_responses_and_cancellation_do_not_advance()->Result<()> {
  fake.0.extend([("slack_read_channel",repeated.clone()),("slack_read_channel",repeated)]);
  assert!(slack::sync(&mut db,"s",&settings(),&mut fake,||false).is_err());
  assert_eq!(db.query_row("SELECT pages FROM remote_sync",[],|r|r.get::<_,i64>(0))?,1);
+ Ok(())
+}
+
+#[test]
+fn history_and_update_cutoffs_cover_downtime_and_keep_old_content()->Result<()> {
+ let mut s=settings();s.since="2016-01-01".into();s.update_lookback_days=30;
+ let now=1800000000;
+ let history=1451606400;
+ assert_eq!(slack::scan_start(&s,None,now)?,history);
+ assert_eq!(slack::scan_start(&s,Some(now-300),now)?,now-30*86400);
+ assert_eq!(slack::scan_start(&s,Some(now-90*86400),now)?,now-90*86400-1);
+ s.update_lookback_days=36500;assert_eq!(slack::scan_start(&s,Some(now-300),now)?,history);
+ let legacy:Settings=serde_json::from_value(json!({"channel":"C12345678","workspace":"https://example.slack.com","since":"2016-01-01","poll_seconds":300}))?;
+ assert_eq!(legacy.update_lookback_days,30);legacy.validate()?;
+ s.update_lookback_days=0;assert!(s.validate().is_err());
+ Ok(())
+}
+
+#[test]
+fn incremental_bounds_resume_without_skipping_and_full_reload_resets()->Result<()> {
+ struct Recorder {responses:VecDeque<Value>, calls:Vec<Value>}
+ impl Provider for Recorder {fn read(&mut self,_:&str,args:Value)->Result<Value>{self.calls.push(args);let response=self.responses.pop_front().unwrap();if response.is_null(){anyhow::bail!("retry")}Ok(response)}}
+ let mut db=good_search::open_db(std::path::Path::new(":memory:"))?;
+ let mut s=settings();s.since="2016-01-01".into();
+ let old=message("1451692800.000001","historicneedle");
+ let mut provider=Recorder{responses:VecDeque::from([envelope(&old,Some("page2")),Value::Null]),calls:vec![]};
+ assert!(slack::sync(&mut db,"s",&s,&mut provider,||false).is_err());
+ assert_eq!(provider.calls[0]["oldest"],"1451606400");
+ assert_eq!(db.query_row("SELECT checkpoint FROM remote_sync",[],|r|r.get::<_,Option<String>>(0))?,None);
+ // Changing the update lookback does not change the bounds of the page in flight.
+ s.update_lookback_days=7;
+ provider.responses.push_back(envelope("No messages",None));
+ slack::sync(&mut db,"s",&s,&mut provider,||false)?;
+ assert_eq!(provider.calls[2]["cursor"],"page2");
+ assert_eq!(provider.calls[0]["oldest"],provider.calls[2]["oldest"]);
+ assert_eq!(provider.calls[0]["latest"],provider.calls[2]["latest"]);
+ let checkpoint=db.query_row("SELECT checkpoint FROM remote_sync",[],|r|r.get::<_,String>(0))?;
+ assert_eq!(provider.calls[0]["latest"],checkpoint);
+ // The next successful scan is incremental, even when the polling interval changes.
+ s.poll_seconds=600;
+ provider.responses.push_back(envelope("No messages",None));
+ slack::sync(&mut db,"s",&s,&mut provider,||false)?;
+ let call=&provider.calls[3];let upper=call["latest"].as_str().unwrap().parse::<i64>()?;
+ assert_eq!(call["oldest"].as_str().unwrap().parse::<i64>()?,slack::scan_start(&s,Some(checkpoint.parse()?),upper)?);
+ assert_eq!(good_search::search(&db,"historicneedle",10)?.len(),1);
+ // Explicit reload rechecks the full date range, preserving existing indexed results.
+ s.reload_generation+=1;
+ provider.responses.push_back(envelope("No messages",None));
+ slack::sync(&mut db,"s",&s,&mut provider,||false)?;
+ assert_eq!(provider.calls[4]["oldest"],"1451606400");
+ assert_eq!(good_search::search(&db,"historicneedle",10)?.len(),1);
  Ok(())
 }

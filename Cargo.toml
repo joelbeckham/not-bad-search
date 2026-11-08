@@ -7,7 +7,7 @@ default-run = "good-search"
 [dependencies]
 anyhow = "1"
 raw-window-handle = "0.6"
-eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "clipboard"] }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "system_fonts", "glow", "clipboard"] }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 notify = "8"
 globset = "0.4"
