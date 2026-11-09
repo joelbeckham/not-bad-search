@@ -370,6 +370,23 @@ impl App {
             self.query_error = Some("Search worker stopped. Restart Good Search.".into());
         }
     }
+    fn set_source_paused_now(&mut self,id:&str,paused:bool)->Result<()> {
+        // Persist only this control; source-detail and other settings edits stay drafts.
+        let mut saved=self.shared_config.lock().unwrap().clone();
+        let source=saved.sources.iter_mut().find(|s|s.id==id).context("Save this source first")?;
+        source.paused=paused;
+        saved.sync_sources();
+        saved.validate()?;
+        std::fs::write(&self.config_path,toml::to_string_pretty(&saved)?).context("Saving source processing state")?;
+        *self.shared_config.lock().unwrap()=saved;
+        if let Some(source)=self.config.sources.iter_mut().find(|s|s.id==id){source.paused=paused;}
+        self.error.clear();
+        let _=self.index_wake.try_send(());
+        let _=self.image_wake.try_send(false);
+        self.semantic.wake();
+        let _=self.remote_wake.try_send(());
+        Ok(())
+    }
     fn save(&mut self) -> Result<()> {
         let mut config = self.config.clone();
         config.max_content_bytes = self.content_limit_mib * 1024 * 1024;

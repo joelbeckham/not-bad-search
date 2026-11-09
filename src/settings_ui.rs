@@ -495,7 +495,8 @@ impl App {
             ui.colored_label(Color32::LIGHT_RED, &self.source_settings.error);
         }
         let saved_config = self.shared_config.lock().unwrap().clone();
-        for source in &self.config.sources {
+        let mut toggle_source=None;
+        for source in &mut self.config.sources {
             let paused = saved_config
                 .sources
                 .iter()
@@ -508,17 +509,33 @@ impl App {
                 .show(ui, |ui| {
                     ui.set_min_width((ui.available_width() - 4.).max(0.));
                     ui.horizontal(|ui| {
-                        ui.add(status_icon(paused).sense(egui::Sense::hover()))
-                            .on_hover_text(if paused {
-                                "Paused"
-                            } else {
-                                "Background processing enabled"
-                            });
-                        if ui.button(RichText::new(&source.name).size(17.)).clicked() {
+
+                        let (uri,bytes)=match source.kind {
+                            good_search::sources::SourceKind::Folder=>good_search::file_icons::folder_icon(),
+                            good_search::sources::SourceKind::Jira=>good_search::file_icons::jira_icon(),
+                            good_search::sources::SourceKind::Slack=>good_search::file_icons::slack_icon(),
+                            good_search::sources::SourceKind::Gmail=>good_search::file_icons::gmail_icon(),
+                            good_search::sources::SourceKind::Notion=>good_search::file_icons::notion_icon(),
+                        };
+                        ui.add(egui::Image::from_bytes(uri,bytes).fit_to_exact_size(egui::vec2(22.,22.))).on_hover_text(source.label());
+                        let title=RichText::new(&source.name).size(17.);
+                        let title_width=ui.painter().layout_no_wrap(source.name.clone(),egui::FontId::proportional(17.),ui.visuals().text_color()).size().x.min((ui.available_width()-76.).max(30.));
+                        ui.add_sized(egui::vec2(title_width,28.),egui::Label::new(title).truncate()).on_hover_text(&source.name);
+                        let action=if paused {"Resume processing"} else {"Pause processing"};
+                        let saved=saved_config.sources.iter().any(|s|s.id==source.id);
+                        let toggle=ui.add_enabled(saved,egui::Button::image(status_icon(paused)).min_size(egui::vec2(28.,28.)))
+                            .on_hover_text(format!("{action} immediately"))
+                            .on_disabled_hover_text("Save this new source before starting processing.");
+                        toggle.widget_info(||egui::WidgetInfo::labeled(egui::Role::Button,true,action));
+                        if toggle.clicked() { toggle_source=Some((source.id.clone(),!paused)); }
+                        if edit_source_icon(ui,&format!("Edit {}",source.name)).clicked() {
                             self.source_settings.selected = Some(source.id.clone());
                         }
-                        ui.weak(source.label());
+
                     });
+                    if source.paused!=paused {
+                        ui.weak(if source.paused {"Pending: pause processing. Save to apply."} else {"Pending: resume processing. Save to apply."});
+                    }
                     ui.label(if let Some(notion)=&source.notion { format!("{} page roots · {} teamspaces",notion.pages.lines().filter(|s|!s.trim().is_empty()).count(),notion.teamspaces.lines().filter(|s|!s.trim().is_empty()).count()) } else if let Some(gmail)=&source.gmail { format!("{} Â· since {}",gmail.query,gmail.since) } else if let Some(slack)=&source.slack {
                         format!("{} · {}",slack.workspace,slack.channel)
                     } else if source.is_folder() {
@@ -543,10 +560,16 @@ impl App {
                 });
             ui.add_space(8.);
         }
+        if let Some((id,paused))=toggle_source {
+            match self.set_source_paused_now(&id,paused) {
+                Ok(())=>self.source_settings.checked=None,
+                Err(error)=>self.error=format!("Could not change source processing: {error:#}"),
+            }
+        }
         if self.config.sources.is_empty() {
             ui.label("Add a folder to start searching your files.");
         }
-        ui.weak("Counts reflect saved settings and the latest local index. Status refreshes every two seconds while this tab is open; offline sources retain their previous snapshot.");
+
     }
     fn draw_search_settings(&mut self, ui: &mut egui::Ui) {
         ui.label(RichText::new("Semantic search").size(13.));
@@ -807,4 +830,11 @@ fn draw_status(ui: &mut egui::Ui, s: &Status, paused: bool, detail: bool) {
         ));
         ui.weak("Ready means all enabled stages are complete in the current index snapshot. Filename-only files are ready after discovery.");
     }
+}
+
+fn edit_source_icon(ui:&mut egui::Ui,label:&str)->egui::Response {
+    let image=egui::Image::from_bytes("bytes://settings/edit-source.svg",br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m15 5 4 4M4 20l5-1L20 8a2.8 2.8 0 0 0-4-4L5 15l-1 5Z" fill="none" stroke="#cdd6f4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>"##).fit_to_exact_size(egui::vec2(18.,18.));
+    let response=ui.add(egui::Button::image(image).min_size(egui::vec2(28.,28.))).on_hover_text(label);
+    response.widget_info(||egui::WidgetInfo::labeled(egui::Role::Button,true,label));
+    response
 }

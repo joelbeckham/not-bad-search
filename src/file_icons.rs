@@ -65,6 +65,7 @@ mod tests {
     fn all_mapped_icons_render() {
         egui_extras::image::load_svg_bytes(jira_icon().1, &Default::default())
             .expect("Invalid bundled Jira icon");
+        egui_extras::image::load_svg_bytes(notion_icon().1, &Default::default()).expect("Invalid bundled Notion logo");
         let map = mapping();
         let ids: std::collections::HashSet<_> = map
             .file_names
@@ -88,5 +89,9 @@ pub fn gmail_icon() -> (&'static str, &'static [u8]) {
 }
 
 pub fn notion_icon() -> (&'static str, &'static [u8]) {
- ("bytes://notion.svg",br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="3" fill="#f5f5f5"/><path d="M7 18V6h3l7 12V6M5 6h6M14 6h5M5 18h5" fill="none" stroke="#222" stroke-width="2"/></svg>"##)
+    ("bytes://sources/notion.svg", include_bytes!("../assets/sources/notion.svg"))
+}
+
+pub fn folder_icon() -> (&'static str, &'static [u8]) {
+    ("bytes://sources/folder.svg",br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 6a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2Z" fill="#f9e2af"/><path d="M2 10h20" stroke="#d4ad69" stroke-width="1.5"/></svg>"##)
 }
