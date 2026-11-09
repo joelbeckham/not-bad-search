@@ -38,7 +38,7 @@ pub trait Provider {
 impl Provider for crate::bifrost::Mcp {
     fn read(&mut self, tool: &str, args: Value) -> Result<Value> { self.slack_read(tool,args) }
 }
-#[derive(Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message { pub ts: String, pub author: String, pub body: String, pub replies: bool, pub files: Vec<String> }
 pub struct Page { pub messages: Vec<Message>, pub next: Option<String> }
 fn valid_ts(ts: &str) -> bool {
@@ -113,7 +113,7 @@ pub fn sync(db: &mut Connection, source: &str, s: &Settings, provider: &mut impl
     use crate::jira::{now,Outcome};
     s.validate()?;
     // Poll frequency and rolling lookback do not invalidate the history import.
-    let scope=blake3::hash(serde_json::to_string(&json!(["slack-incremental-v1",s.channel,s.workspace,s.since,s.reload_generation]))?.as_bytes()).to_hex().to_string();
+    let scope=blake3::hash(serde_json::to_string(&json!(["slack-conversations-v2",s.channel,s.workspace,s.since,s.reload_generation]))?.as_bytes()).to_hex().to_string();
     db.execute("INSERT INTO remote_sync(source_id,scope_hash) VALUES(?1,?2) ON CONFLICT DO NOTHING",params![source,scope])?;
     db.execute("UPDATE remote_sync SET scope_hash=?2,run_id=NULL,next_token=NULL,last_success=NULL,checkpoint=NULL,candidate=NULL WHERE source_id=?1 AND scope_hash!=?2",params![source,scope])?;
     let started=now();
@@ -130,26 +130,16 @@ pub fn sync(db: &mut Connection, source: &str, s: &Settings, provider: &mut impl
         if cancel() { return Ok(Outcome::Cancelled); }
         let mut args=json!({"channel_id":s.channel,"limit":50,"oldest":oldest,"latest":latest,"response_format":"detailed"});
         if let Some(c)=&cursor {args["cursor"]=json!(c);}
-        let mut page=parse_page(provider.read("slack_read_channel",args)?)?;
+        let page=parse_page(provider.read("slack_read_channel",args)?)?;
         if let Some(c)=&page.next {ensure!(seen.insert(c.clone()),"Slack repeated a continuation cursor");}
-        let parents:Vec<String>=page.messages.iter().filter(|m|m.replies).map(|m|m.ts.clone()).collect();
-        for ts in parents {
-            let mut thread_cursor=None;
-            let mut thread_seen=std::collections::HashSet::new();
-            for n in 0..100 {
-                if cancel() {return Ok(Outcome::Cancelled);}
-                let mut args=json!({"channel_id":s.channel,"message_ts":ts,"limit":100,"response_format":"detailed"});
-                if let Some(c)=&thread_cursor {args["cursor"]=json!(c);}
-                let replies=parse_page(provider.read("slack_read_thread",args)?)?;
-                page.messages.extend(replies.messages.into_iter().filter(|m|m.ts!=ts));
-                thread_cursor=replies.next;
-                let Some(c)=&thread_cursor else {break};
-                ensure!(thread_seen.insert(c.clone()) && n<99,"Slack thread pagination did not complete");
-            }
+        let mut conversations=Vec::new();
+        for parent in &page.messages {
+            let messages=if parent.replies {read_conversation(provider,s,&parent.ts,Some(parent.clone()),&cancel)?}else{Some(vec![parent.clone()])};
+            if let Some(messages)=messages {conversations.push(messages);}else{return Ok(Outcome::Cancelled);}
         }
         if cancel() {return Ok(Outcome::Cancelled);}
         let tx=db.transaction()?;
-        for m in &page.messages {publish(&tx,source,s,&run,&scope,m)?;}
+        for messages in &conversations {publish_conversation(&tx,source,s,&run,&scope,messages)?;}
         tx.execute("UPDATE remote_sync SET next_token=?2,pages=pages+1,items=items+?3,error='',failures=0,retry_at=0,last_attempt=?4 WHERE source_id=?1",params![source,page.next,page.messages.len() as i64,now()])?;
         if page.next.is_none() {tx.execute("UPDATE remote_sync SET run_id=NULL,last_success=?2,checkpoint=run_jql WHERE source_id=?1",params![source,now()])?;}
         tx.commit()?;
@@ -162,24 +152,84 @@ pub fn scan_start(s:&Settings,checkpoint:Option<i64>,now:i64)->Result<i64> {
     let history=chrono::NaiveDate::parse_from_str(&s.since,"%Y-%m-%d")?.and_hms_opt(0,0,0).unwrap().and_utc().timestamp();
     Ok(checkpoint.map_or(history,|last| history.max(last.saturating_sub(1).min(now.saturating_sub(i64::from(s.update_lookback_days)*86400)))))
 }
-fn publish(db:&Connection,source:&str,s:&Settings,run:&str,scope:&str,m:&Message)->Result<()> {
+fn read_conversation(provider:&mut impl Provider,s:&Settings,ts:&str,seed:Option<Message>,cancel:&impl Fn()->bool)->Result<Option<Vec<Message>>> {
+    let mut messages=std::collections::BTreeMap::new();
+    if let Some(m)=seed {messages.insert(m.ts.clone(),m);}
+    let mut cursor=None;
+    let mut seen=std::collections::HashSet::new();
+    for _ in 0..100 {
+        if cancel() {return Ok(None);}
+        let mut args=json!({"channel_id":s.channel,"message_ts":ts,"limit":100,"response_format":"detailed"});
+        if let Some(c)=&cursor {args["cursor"]=json!(c);}
+        let page=parse_page(provider.read("slack_read_thread",args)?)?;
+        for m in page.messages {messages.insert(m.ts.clone(),m);}
+        if page.next.is_none() {
+            let mut result:Vec<_>=messages.into_values().collect();
+            result.sort_by_key(|m|m.ts.replace('.',"").parse::<u64>().unwrap_or(0));
+            ensure!(result.first().is_some_and(|m|m.ts==ts),"Slack thread omitted its opening message");
+            return Ok(Some(result));
+        }
+        let next=page.next.unwrap();
+        ensure!(seen.insert(next.clone()),"Slack repeated a thread cursor");
+        cursor=Some(next);
+    }
+    anyhow::bail!("Slack thread exceeded pagination limit")
+}
+fn conversation_chunks(text:&str,opening:&str)->Vec<crate::content::Chunk> {
+    let chars:Vec<char>=text.chars().collect();
+    if chars.len()<=1800 {return vec![crate::content::Chunk{heading:String::new(),line:1,body:text.into()}];}
+    let context:String=opening.chars().take(400).collect();
+    let mut result=Vec::new();
+    let mut start=0;
+    loop {
+        let end=(start+1300).min(chars.len());
+        let passage:String=chars[start..end].iter().collect();
+        result.push(crate::content::Chunk{heading:String::new(),line:1+chars[..start].iter().filter(|c|**c=='\n').count(),body:format!("Thread opening:\n{context}\n\nConversation passage:\n{passage}")});
+        if end==chars.len(){break;}
+        start=end-200;
+    }
+    result
+}
+fn publish_conversation(db:&Connection,source:&str,s:&Settings,run:&str,scope:&str,messages:&[Message])->Result<()> {
     use rusqlite::OptionalExtension;
+    let m=messages.first().context("Slack conversation has no opening message")?;
     let uri=format!("good-search://slack/{source}/{}/{}",s.channel,m.ts);
     let title=format!("{} · {}",s.channel,m.body.lines().next().unwrap_or("Message").chars().take(120).collect::<String>());
-    let text=format!("{}\n{}\n\n{}",s.channel,m.author,m.body);
+    if messages.len()==1 {
+        let owned:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM remote_items r,json_each(r.raw_content,'$.messages') j WHERE r.source_id=?1 AND r.content_format='slack' AND json_extract(r.raw_content,'$.ts')!=?2 AND json_extract(j.value,'$.ts')=?2)",params![source,m.ts],|r|r.get(0))?;
+        if owned {return Ok(());}
+    }
+    let mut text=format!("{}\n",s.channel);
+    let mut files=std::collections::BTreeSet::new();
+    for message in messages {
+        let date=message.ts.split('.').next().and_then(|s|s.parse::<i64>().ok()).and_then(|s|chrono::DateTime::from_timestamp(s,0)).map(|d|d.to_rfc3339()).unwrap_or_else(||message.ts.clone());
+        text.push_str(&format!("\n{}\nPosted: {date}\n\n{}\n",message.author,message.body));
+        files.extend(message.files.iter().cloned());
+    }
+    let latest=&messages.last().unwrap().ts;
     let hash=blake3::hash(text.as_bytes()).to_hex().to_string();
     db.execute("INSERT INTO files(root,path,name,folded) VALUES(?1,?2,?3,?4) ON CONFLICT(path) DO UPDATE SET name=excluded.name,folded=excluded.folded",params![format!("slack:{source}"),uri,title,title.to_lowercase()])?;
     let file:i64=db.query_row("SELECT id FROM files WHERE path=?1",[uri],|r|r.get(0))?;
+    // Replace legacy reply documents while preserving their cached images.
+    for reply in messages.iter().skip(1) {
+        let path=format!("good-search://slack/{source}/{}/{}",s.channel,reply.ts);
+        let old:Option<i64>=db.query_row("SELECT id FROM files WHERE path=?1",[path],|r|r.get(0)).optional()?;
+        if let Some(old)=old {
+            db.execute("DELETE FROM files WHERE id IN (SELECT file_id FROM attachments WHERE parent_file_id=?1 AND remote_id IN (SELECT remote_id FROM attachments WHERE parent_file_id=?2))",params![old,file])?;
+            db.execute("UPDATE attachments SET parent_file_id=?2 WHERE parent_file_id=?1",params![old,file])?;
+            db.execute("DELETE FROM files WHERE id=?1",[old])?;
+        }
+    }
     let old:Option<String>=db.query_row("SELECT content_hash FROM remote_items WHERE file_id=?1",[file],|r|r.get(0)).optional()?;
     let url=format!("{}/archives/{}/p{}",s.workspace.trim_end_matches('/'),s.channel,m.ts.replace('.',""));
     // Slack's deployed transcript omits edit timestamps; do not label the posted time as updated.
-    let raw=serde_json::to_string(&json!({"files":m.files,"ts":m.ts}))?;
-    db.execute("INSERT INTO remote_items(file_id,source_id,connection_id,site,remote_id,issue_key,title,original_url,remote_updated,synced_at,content_hash,raw_content,searchable_text,warnings,last_seen_run,scope_hash,content_format) VALUES(?1,?2,'default',?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'[]',?13,?14,'slack') ON CONFLICT(file_id) DO UPDATE SET title=excluded.title,original_url=excluded.original_url,synced_at=excluded.synced_at,content_hash=excluded.content_hash,raw_content=excluded.raw_content,searchable_text=excluded.searchable_text,last_seen_run=excluded.last_seen_run,scope_hash=excluded.scope_hash",params![file,source,s.workspace,format!("{}/{}",s.channel,m.ts),s.channel,title,url,m.ts,crate::jira::now(),hash,raw,text,run,scope])?;
+    let raw=serde_json::to_string(&json!({"files":files,"ts":m.ts,"messages":messages}))?;
+    db.execute("INSERT INTO remote_items(file_id,source_id,connection_id,site,remote_id,issue_key,title,original_url,remote_updated,synced_at,content_hash,raw_content,searchable_text,warnings,last_seen_run,scope_hash,content_format) VALUES(?1,?2,'default',?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'[]',?13,?14,'slack') ON CONFLICT(file_id) DO UPDATE SET title=excluded.title,original_url=excluded.original_url,remote_updated=excluded.remote_updated,synced_at=excluded.synced_at,content_hash=excluded.content_hash,raw_content=excluded.raw_content,searchable_text=excluded.searchable_text,last_seen_run=excluded.last_seen_run,scope_hash=excluded.scope_hash",params![file,source,s.workspace,format!("{}/{}",s.channel,m.ts),s.channel,title,url,latest,crate::jira::now(),hash,raw,text,run,scope])?;
     if old.as_deref()==Some(&hash) {return Ok(());}
     db.execute("INSERT INTO documents(file_id,kind,source_hash,extractor_version,chunker_version,status,detail) VALUES(?1,'text',?2,1,1,'ready','') ON CONFLICT(file_id,kind) DO UPDATE SET source_hash=excluded.source_hash",params![file,hash])?;
     let doc:i64=db.query_row("SELECT id FROM documents WHERE file_id=?1 AND kind='text'",[file],|r|r.get(0))?;
     db.execute("DELETE FROM chunks WHERE document_id=?1",[doc])?;
-    for (i,c) in crate::content::chunks(&text).into_iter().enumerate() {db.execute("INSERT INTO chunks(document_id,ordinal,heading,start_line,body,content_hash) VALUES(?1,?2,?3,?4,?5,?6)",params![doc,i as i64,c.heading,c.line as i64,c.body,blake3::hash(c.body.as_bytes()).to_hex().to_string()])?;}
+    for (i,c) in conversation_chunks(&text,&m.body).into_iter().enumerate() {db.execute("INSERT INTO chunks(document_id,ordinal,heading,start_line,body,content_hash) VALUES(?1,?2,?3,?4,?5,?6)",params![doc,i as i64,c.heading,c.line as i64,c.body,blake3::hash(c.body.as_bytes()).to_hex().to_string()])?;}
     Ok(())
 }
 
@@ -214,4 +264,21 @@ pub fn sync_images(db:&mut Connection,source:&str,provider:&mut impl Provider,ca
         db.execute("INSERT OR REPLACE INTO attachment_scans VALUES(?1,?2)",params![parent,revision])?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn long_conversations_preserve_unicode_and_overlap() {
+        let text=format!("opening\n{}\nuniqueending", "🙂é漢字 ".repeat(900));
+        let chunks=super::conversation_chunks(&text,"opening");
+        assert!(chunks.len()>2);
+        let mut restored=String::new();
+        for (i,chunk) in chunks.iter().enumerate() {
+            assert!(chunk.body.starts_with("Thread opening:\nopening\n"));
+            let passage=chunk.body.split_once("Conversation passage:\n").unwrap().1;
+            restored.extend(passage.chars().skip(if i==0 {0}else{200}));
+        }
+        assert_eq!(restored,text);
+    }
 }

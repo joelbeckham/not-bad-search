@@ -4,14 +4,15 @@ use good_search::bifrost::{Connection, Mcp};
 use serde_json::json;
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
-    if args.get(1).is_some_and(|s|s=="notion-restart") {
+    if args.get(1).is_some_and(|s|s=="notion-restart"||s=="slack-restart") {
         let dir=std::path::Path::new(args.get(2).context("data directory required")?);
         let id=args.get(3).context("source ID required")?;
         let config:good_search::Config=toml::from_str(&std::fs::read_to_string(dir.join("config.toml"))?)?;
-        anyhow::ensure!(config.sources.iter().any(|s|&s.id==id&&s.kind==good_search::sources::SourceKind::Notion),"Not a configured Notion source");
+        let kind=if args[1]=="slack-restart" {good_search::sources::SourceKind::Slack}else{good_search::sources::SourceKind::Notion};
+        anyhow::ensure!(config.sources.iter().any(|s|&s.id==id&&s.kind==kind),"Not a configured source of the requested kind");
         let db=good_search::open_writer(&dir.join("index.sqlite"))?;
         db.execute("UPDATE remote_sync SET run_id=NULL,next_token=NULL,last_success=NULL,retry_at=0,failures=0,error='' WHERE source_id=?1",[id])?;
-        println!("Notion source scheduled for fresh traversal; indexed content retained");return Ok(());
+        println!("Source scheduled for fresh traversal; indexed content retained");return Ok(());
     }
     if args.get(1).is_some_and(|s| s == "status") {
         let path = std::path::Path::new(args.get(2).context("Data directory required")?);
@@ -230,7 +231,8 @@ fn main() -> Result<()> {
         let outcome=good_search::slack::sync(&mut db,"slack-smoke",&settings,&mut m,||false)?;
         good_search::slack::sync_images(&mut db,"slack-smoke",&mut m,&dir.join("attachments"),||false)?;
         let counts:(i64,i64)=db.query_row("SELECT (SELECT count(*) FROM remote_items),(SELECT count(*) FROM attachments)",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
-        println!("Slack sync {outcome:?}; {} messages, {} cached images",counts.0,counts.1);
+        let threads:i64=db.query_row("SELECT count(*) FROM remote_items WHERE json_array_length(raw_content,'$.messages')>1",[],|r|r.get(0))?;
+        println!("Slack sync {outcome:?}; {} conversations ({threads} with replies), {} cached images",counts.0,counts.1);
         return Ok(());
     }
     if args.get(1).is_some_and(|s|s=="gmail-smoke") {

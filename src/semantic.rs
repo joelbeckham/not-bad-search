@@ -212,18 +212,14 @@ impl VectorIndex {
                         "image_text" => "image text",
                         _ => "text",
                     };
+                    let excerpt=if path.starts_with("good-search://slack/") {body.split_once("Conversation passage:\n").map_or(body.as_str(),|(_,passage)|passage)}else{body.as_str()};
+                    let snippet=format!("Semantic {kind}: {}",excerpt.chars().take(180).collect::<String>().replace(['\n','\r']," "));
                     hits.push(Hit {
                         original_url: None,
-                        jira: None, gmail: None, timestamp: None, notion: false, slack: false,
+                        jira: None, gmail: None, timestamp: None, notion: false, slack: false, slack_replies: None,
                         path,
                         name,
-                        snippet: Some(format!(
-                            "Semantic {kind}: {}",
-                            body.chars()
-                                .take(180)
-                                .collect::<String>()
-                                .replace(['\n', '\r'], " ")
-                        )),
+                        snippet: Some(snippet),
                     });
                     if !filters.sort.by_date() && hits.len() >= limit {
                         break;

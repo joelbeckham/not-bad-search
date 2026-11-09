@@ -174,6 +174,7 @@ impl App {
         .on_hover_text(hit.location());
         jira_summary(ui, hit, true);
         gmail_summary(ui, hit, true);
+        slack_summary(ui, hit);
         if let Some(info) = &hit.jira {
             ui.horizontal_wrapped(|ui| {
                 for (label, value) in [("Assignee", &info.assignee), ("Type", &info.issue_type), ("Priority", &info.priority), ("Project", &info.project)] {
@@ -399,4 +400,12 @@ pub(super) fn gmail_summary(ui:&mut egui::Ui,hit:&Hit,expanded:bool) {
     let line=parts.join(" · ");
     let label=egui::Label::new(RichText::new(&line).small().weak());
     if expanded {ui.add(label.wrap());} else {ui.add(label.truncate()).on_hover_text(&line);}
+}
+
+pub(super) fn slack_summary(ui:&mut egui::Ui,hit:&Hit) {
+    let Some(replies)=hit.slack_replies else{return};
+    let date=hit.timestamp.and_then(|ts|chrono::DateTime::from_timestamp(ts,0)).map(|d|d.with_timezone(&chrono::Local).format("%b %d, %Y %H:%M").to_string());
+    let mut line=match replies {0=>"Message".into(),1=>"1 reply".into(),n=>format!("{n} replies")};
+    if let Some(date)=date {line.push_str(&format!(" · Latest: {date}"));}
+    ui.add(egui::Label::new(RichText::new(&line).small().weak()).truncate()).on_hover_text(line);
 }

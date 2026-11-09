@@ -285,7 +285,7 @@ impl App {
                     .show(ui, |ui| {
                         for (index, hit) in self.hits.iter().enumerate() {
                             let (rect, response) = ui.allocate_exact_size(
-                                Vec2::new(ui.available_width(), (if hit.snippet.is_some() { 78. } else { 58. }) + if hit.jira.is_some() || hit.gmail.is_some() { 22. } else { 0. }),
+                                Vec2::new(ui.available_width(), (if hit.snippet.is_some() { 78. } else { 58. }) + if hit.jira.is_some() || hit.gmail.is_some() || hit.slack_replies.is_some() { 22. } else { 0. }),
                                 Sense::click(),
                             );
                             let selected = index == self.selected;
@@ -348,6 +348,7 @@ impl App {
                             }
                             crate::preview_ui::jira_summary(&mut row_ui, hit, false);
                             crate::preview_ui::gmail_summary(&mut row_ui, hit, false);
+                            crate::preview_ui::slack_summary(&mut row_ui, hit);
                             ui.painter().text(
                                 rect.right_center() - Vec2::new(15., 0.),
                                 egui::Align2::RIGHT_CENTER,

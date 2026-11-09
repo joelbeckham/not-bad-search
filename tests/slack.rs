@@ -37,6 +37,10 @@ fn thread_and_image_pipeline_and_scope_filter()->Result<()> {
  let mut fake=Fake(VecDeque::from([("slack_read_channel",envelope(&parent,None)),("slack_read_thread",envelope(thread,None))]));
  slack::sync(&mut db,"s",&settings(),&mut fake,||false)?;
  assert_eq!(good_search::search(&db,"replyneedle",10)?.len(),1);
+ let combined=good_search::search(&db,"parentneedle replyneedle",10)?;
+ assert_eq!(combined.len(),1);
+ assert_eq!(combined[0].slack_replies,Some(1));
+ assert_eq!(combined[0].timestamp,Some(1793980805));
  let dir=tempfile::tempdir()?; let image=dir.path().join("fixture.png"); image::RgbImage::new(8,8).save(&image)?;
  let bytes=std::fs::read(&image)?;
  fake.0.push_back(("slack_read_file",json!({"content":[{"type":"text","text":format!("[Image Response: {}, MIME: image/png]",base64::engine::general_purpose::STANDARD.encode(bytes))}]})));
@@ -46,11 +50,46 @@ fn thread_and_image_pipeline_and_scope_filter()->Result<()> {
  good_search::images::discover(&mut db,&config)?;
  struct Extract;impl good_search::images::Extractor for Extract {fn extract(&self,_:&str,_:&str,_:&[u8])->Result<good_search::images::Extraction>{Ok(good_search::images::Extraction{extracted_text:"visualneedle".into(),description:"screenshot".into()})}}
  assert!(good_search::images::process_one(&mut db,&Extract,||config.clone())?);
- let hits=good_search::search(&db,"visualneedle",10)?;assert_eq!(hits.len(),1);assert!(hits[0].slack);assert!(hits[0].location().ends_with("p1793980805775709"));
+ let hits=good_search::search(&db,"visualneedle",10)?;assert_eq!(hits.len(),1);assert!(hits[0].slack);assert!(hits[0].location().ends_with("p1793980803775709"));
  let filters=good_search::SearchFilters{roots:Some(vec!["jira:s".into()]),..Default::default()};assert!(good_search::search_filtered(&db,"visualneedle",10,filters)?.is_empty());
  let mut paused=config.clone();paused.sources[0].paused=true;assert!(paused.source_paused(std::path::Path::new("slack:s")));
  // Idempotent attachment refresh uses the cache and makes no additional file request.
  slack::sync_images(&mut db,"s",&mut fake,dir.path(),||false)?;
+ Ok(())
+}
+
+#[test]
+fn thread_pagination_is_atomic_and_replaces_legacy_replies()->Result<()> {
+ let mut db=good_search::open_db(std::path::Path::new(":memory:"))?;
+ let root="1793980803.775709";
+ let reply="1793980805.775709";
+ let parent=message(root,"openingneedle\nThread: 1 replies");
+ let mut fake=Fake(VecDeque::from([("slack_read_channel",envelope(&message(reply,"oldreplyneedle"),None))]));
+ slack::sync(&mut db,"s",&settings(),&mut fake,||false)?;
+ db.execute("INSERT INTO files(root,path,name,folded) VALUES('slack:s','cached-image.png','image','image')",[])?;
+ let image=db.last_insert_rowid();
+ db.execute("INSERT INTO attachments SELECT ?1,file_id,'slack','s','F12345678','image.png','image/png',8,'hash','now' FROM remote_items",[image])?;
+ fake.0.extend([("slack_read_channel",envelope(&parent,None)),("slack_read_thread",envelope(&message(root,"openingneedle"),Some("replies"))),("slack_read_thread",Value::Null)]);
+ assert!(slack::sync(&mut db,"s",&settings(),&mut fake,||false).is_err());
+ assert_eq!(good_search::search(&db,"oldreplyneedle",10)?.len(),1);
+ assert!(good_search::search(&db,"openingneedle",10)?.is_empty());
+ let transcript=format!("{}\n{}\n{}",message(reply,"newreplyneedle"),message(root,"openingneedle"),message(reply,"newreplyneedle"));
+ fake.0.extend([("slack_read_channel",envelope(&parent,None)),("slack_read_thread",envelope(&transcript,None))]);
+ slack::sync(&mut db,"s",&settings(),&mut fake,||false)?;
+ assert!(good_search::search(&db,"oldreplyneedle",10)?.is_empty());
+ let hits=good_search::search(&db,"openingneedle newreplyneedle",10)?;
+ assert_eq!(hits.len(),1); assert_eq!(hits[0].slack_replies,Some(1));
+ assert_eq!(db.query_row("SELECT count(*) FROM remote_items",[],|r|r.get::<_,i64>(0))?,1);
+ assert_eq!(db.query_row("SELECT file_id FROM attachments",[],|r|r.get::<_,i64>(0))?,image);
+ assert!(db.query_row("SELECT f.path FROM attachments a JOIN files f ON f.id=a.parent_file_id",[],|r|r.get::<_,String>(0))?.ends_with(root));
+ // A broadcast copy must not recreate the standalone reply result.
+ fake.0.push_back(("slack_read_channel",envelope(&message(reply,"newreplyneedle"),None)));
+ slack::sync(&mut db,"s",&settings(),&mut fake,||false)?;
+ assert_eq!(good_search::search(&db,"newreplyneedle",10)?.len(),1);
+ // Removed replies disappear on the next complete thread read.
+ fake.0.extend([("slack_read_channel",envelope(&parent,None)),("slack_read_thread",envelope(&message(root,"openingneedle"),None))]);
+ slack::sync(&mut db,"s",&settings(),&mut fake,||false)?;
+ assert!(good_search::search(&db,"newreplyneedle",10)?.is_empty());
  Ok(())
 }
 #[test]

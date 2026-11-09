@@ -418,7 +418,7 @@ mod selection_tests {
     use super::*;
     #[test]
     fn reranking_preserves_only_intentional_selection() {
-        let hit = |path: &str| Hit { path: path.into(), name: path.into(), snippet: None, original_url: None, jira: None, gmail: None, timestamp: None, notion: false, slack: false };
+        let hit = |path: &str| Hit { path: path.into(), name: path.into(), snippet: None, original_url: None, jira: None, gmail: None, timestamp: None, notion: false, slack: false, slack_replies: None };
         let old = vec![hit("a"), hit("b")];
         let new = vec![hit("b"), hit("c"), hit("a")];
         assert_eq!(updated_selection(&old, &new, 0, false), 0);
