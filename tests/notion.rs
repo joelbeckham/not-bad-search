@@ -233,3 +233,47 @@ fn database_query_uses_bound_keyset_and_rejects_stalled_rows() -> Result<()> {
     assert!(notion::database_page(&mut Query, "collection://bad] DROP TABLE x", "").is_err());
     Ok(())
 }
+
+#[test]
+fn blank_database_rows_index_properties_and_do_not_stop_traversal() -> Result<()> {
+    let tmp = tempfile::tempdir()?;
+    let mut db = good_search::open_db(&tmp.path().join("index.sqlite"))?;
+    let blank = json!({"metadata":{"type":"page"},"title":"Postgres health","url":format!("https://www.notion.so/{ROOT}"),"text":r#"<page><properties>{" Details":"Query tuning guide","Discipline":"SRE","Concern":"🟡"}</properties><blank-page>This page is blank and has no content.</blank-page></page>"#});
+    let parsed = notion::parse_page(&blank)?;
+    assert!(parsed.text.contains("Details: Query tuning guide"));
+    assert!(parsed.text.contains("Discipline: SRE"));
+    assert!(parsed.children.is_empty());
+    let mut fake = Fake {
+        calls: VecDeque::from([("fetch", blank)]),
+        bytes: vec![],
+    };
+    assert_eq!(
+        notion::sync(
+            &mut db,
+            "s",
+            &settings(),
+            &mut fake,
+            tmp.path(),
+            true,
+            || false
+        )?,
+        Outcome::Complete
+    );
+    let text: String =
+        db.query_row("SELECT searchable_text FROM remote_items", [], |r| r.get(0))?;
+    assert!(text.contains("Query tuning guide"));
+    let mut malformed = page(ROOT, "body");
+    malformed["text"] = json!("<page><properties>{}</properties></page>");
+    assert!(notion::parse_page(&malformed).is_err());
+    malformed["text"] = json!("<page><content>incomplete");
+    assert!(notion::parse_page(&malformed).is_err());
+    Ok(())
+}
+#[test]
+fn nonempty_pages_keep_properties_and_body() -> Result<()> {
+    let mut value = page(ROOT, "Body needle");
+    value["text"]=json!("<page><properties>{\" Details\":\"Property needle\"}</properties><content>Body needle</content></page>");
+    let p = notion::parse_page(&value)?;
+    assert!(p.text.contains("Property needle") && p.text.contains("Body needle"));
+    Ok(())
+}

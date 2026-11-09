@@ -137,7 +137,7 @@ pub fn sync(
     s.validate()?;
     let scope = blake3::hash(
         serde_json::to_string(&json!([
-            "notion-v2-database-query",
+            "notion-v3-page-properties",
             s.pages,
             s.teamspaces,
             s.reload_generation,
@@ -364,15 +364,46 @@ pub fn parse_page(v: &Value) -> Result<Page> {
         "Unsupported Notion object: {kind}"
     );
     let body = if kind == "page" {
-        raw.split_once("<content>")
-            .context("Notion page content boundary missing")?
-            .1
-            .rsplit_once("</content>")
-            .context("Notion page content incomplete")?
-            .0
+        if let Some((_, content)) = raw.split_once("<content>") {
+            content
+                .rsplit_once("</content>")
+                .context("Notion page content incomplete")?
+                .0
+        } else if raw.contains("<blank-page>") && raw.contains("</blank-page>") {
+            // Database rows can have populated properties and no body blocks.
+            ""
+        } else {
+            anyhow::bail!("Notion page content boundary missing");
+        }
     } else {
         raw
     };
+    let mut properties = String::new();
+    if kind == "page" {
+        if let Some((_, tail)) = raw.split_once("<properties>") {
+            let encoded = tail
+                .split_once("</properties>")
+                .context("Notion page properties incomplete")?
+                .0;
+            let values: Value =
+                serde_json::from_str(encoded).context("Invalid Notion page properties")?;
+            for (name, value) in values
+                .as_object()
+                .context("Notion page properties must be an object")?
+            {
+                if name == "url" || value.is_null() {
+                    continue;
+                }
+                let text = value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string());
+                if !text.trim().is_empty() {
+                    properties.push_str(&format!("{}: {}\n", name.trim(), text));
+                }
+            }
+        }
+    }
     // Ignore literal examples inside fenced code while following structural child links.
     let mut structural = String::new();
     let mut fence: Option<(char, usize)> = None;
@@ -416,7 +447,7 @@ pub fn parse_page(v: &Value) -> Result<Page> {
     images.sort();
     images.dedup();
     let title = v["title"].as_str().unwrap_or("Untitled").to_owned();
-    let text = format!("{title}\n\n{body}");
+    let text = format!("{title}\n\n{properties}\n{body}");
     let url = v["url"]
         .as_str()
         .context("Notion omitted page link")?
