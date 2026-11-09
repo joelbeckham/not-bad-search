@@ -128,7 +128,7 @@ impl Mcp {
             for tool in list["tools"].as_array().context("Invalid MCP tool list")? {
                 let name = tool["name"].as_str().context("Unnamed MCP tool")?;
                 m.discovered_tools.push(name.to_owned());
-                if name.starts_with("jira_v2-") || name.to_lowercase().contains("slack") || name.to_lowercase().contains("gmail") {
+                if name.starts_with("jira_v2-") || name.to_lowercase().contains("slack") || name.to_lowercase().contains("gmail") || name.to_lowercase().contains("notion") {
                     m.discovered_schemas
                         .insert(name.to_owned(), tool["inputSchema"].clone());
                 }
@@ -167,6 +167,12 @@ impl Mcp {
     }
     pub fn catalog(&self) -> Value {
         json!(self.tools)
+    }
+    pub fn notion_read(&mut self, tool:&str, arguments:Value)->Result<Value> {
+        ensure!(["fetch","search","get-teams","query-data-sources"].contains(&tool),"Tool is outside the Notion read allowlist");
+        let name=format!("notion-notion-{tool}");
+        ensure!(self.discovered_schemas.contains_key(&name),"Notion tool unavailable: {name}");
+        tool_payload(self.rpc("tools/call",json!({"name":name,"arguments":arguments}),false)?)
     }
     pub fn gmail_read(&mut self, tool: &str, arguments: Value) -> Result<Value> {
         ensure!(["search_threads", "get_thread", "get_message", "list_labels"].contains(&tool), "Tool is outside the Gmail read allowlist");

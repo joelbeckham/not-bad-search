@@ -158,7 +158,7 @@ pub fn discover(db: &mut Connection, config: &Config) -> Result<()> {
             tx.commit()?;
             continue;
         }
-        if !root.starts_with("jira:") && !root.starts_with("slack:") && !Path::new(&root).is_dir() {
+        if !root.starts_with("jira:") && !root.starts_with("slack:") && !root.starts_with("notion:") && !Path::new(&root).is_dir() {
             continue;
         }
         let (hash, state, detail) = match image_bytes(Path::new(&path)) {

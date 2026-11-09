@@ -24,25 +24,28 @@ pub struct Source {
     pub slack: Option<crate::slack::Settings>,
     #[serde(default)]
     pub gmail: Option<crate::gmail::Settings>,
+    #[serde(default)]
+    pub notion: Option<crate::notion::Settings>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceKind {
     Folder,
     Jira,
-    Slack, Gmail,
+    Slack, Gmail, Notion,
 }
 impl Source {
     pub fn root(&self) -> String {
         match self.kind {
             SourceKind::Folder => self.path.to_string_lossy().into_owned(),
             SourceKind::Jira => format!("jira:{}", self.id),
-            SourceKind::Slack => format!("slack:{}", self.id), SourceKind::Gmail => format!("gmail:{}",self.id),
+            SourceKind::Slack => format!("slack:{}", self.id), SourceKind::Gmail => format!("gmail:{}",self.id), SourceKind::Notion => format!("notion:{}",self.id),
         }
     }
     pub fn label(&self) -> &'static str {
-        match self.kind { SourceKind::Folder => "Folder", SourceKind::Jira => "Jira", SourceKind::Slack => "Slack", SourceKind::Gmail => "Gmail" }
+        match self.kind { SourceKind::Folder => "Folder", SourceKind::Jira => "Jira", SourceKind::Slack => "Slack", SourceKind::Gmail => "Gmail", SourceKind::Notion => "Notion" }
     }
+    pub fn notion_source() -> Self {let mut s=Self::jira_source();s.kind=SourceKind::Notion;s.name="Notion".into();s.jira=None;s.notion=Some(Default::default());s.images=true;s}
     pub fn gmail_source() -> Self { let mut source=Self::jira_source(); source.kind=SourceKind::Gmail; source.name="Gmail".into(); source.jira=None; source.gmail=Some(Default::default()); source }
     pub fn slack_source() -> Self {
         let mut source = Self::jira_source();
@@ -87,7 +90,7 @@ impl Source {
             images: false,
             paused: false,
             jira: None,
-            slack: None, gmail: None,
+            slack: None, gmail: None, notion: None,
         }
     }
 }

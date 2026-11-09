@@ -76,7 +76,9 @@ impl Config {
                 bail!("Give each source a name");
             }
             self.source_matcher(&source.path)?;
-            if source.kind == sources::SourceKind::Gmail {
+            if source.kind == sources::SourceKind::Notion {
+                source.notion.as_ref().context("Notion source needs settings")?.validate()?;
+            } else if source.kind == sources::SourceKind::Gmail {
                 source.gmail.as_ref().context("Gmail source needs settings")?.validate()?;
             } else if source.kind == sources::SourceKind::Slack {
                 source.slack.as_ref().context("Slack source needs settings")?.validate()?;
@@ -142,12 +144,13 @@ pub struct Hit {
     pub jira: Option<jira::Metadata>,
     pub gmail: Option<gmail::Metadata>,
     pub slack: bool,
+    pub notion: bool,
     pub path: String,
     pub name: String,
     pub snippet: Option<String>,
 }
 impl Hit {
-    pub fn open_label(&self) -> &str { if self.path.starts_with("good-search://gmail/") { "Open in Gmail" } else if self.slack { "Open in Slack" } else if self.original_url.is_some() { "Open in Jira" } else { "Open file" } }
+    pub fn open_label(&self) -> &str { if self.notion { "Open in Notion" } else if self.path.starts_with("good-search://gmail/") { "Open in Gmail" } else if self.slack { "Open in Slack" } else if self.original_url.is_some() { "Open in Jira" } else { "Open file" } }
     pub fn location(&self) -> &str {
         self.original_url.as_deref().unwrap_or(&self.path)
     }
@@ -166,9 +169,10 @@ pub(crate) fn remote_locations(db: &Connection, hits: &mut [Hit]) -> Result<()> 
         hit.original_url=db.query_row("SELECT r.original_url FROM attachments a JOIN remote_items r ON r.file_id=a.parent_file_id JOIN files f ON f.id=a.file_id WHERE f.path=?1",[&hit.path],|r|r.get(0)).optional()?;
     }
     for hit in hits.iter_mut().filter(|h| h.original_url.is_some()) {
+        hit.notion = db.query_row("SELECT r.content_format='notion' FROM files f LEFT JOIN attachments a ON a.file_id=f.id JOIN remote_items r ON r.file_id=coalesce(a.parent_file_id,f.id) WHERE f.path=?1",[&hit.path],|r|r.get(0))?;
         hit.slack = db.query_row("SELECT r.content_format='slack' FROM files f LEFT JOIN attachments a ON a.file_id=f.id JOIN remote_items r ON r.file_id=coalesce(a.parent_file_id,f.id) WHERE f.path=?1",[&hit.path],|r|r.get(0))?;
         if hit.path.starts_with("good-search://gmail/") { hit.gmail = gmail::metadata(db, &hit.path)?; }
-        if !hit.slack && !hit.path.starts_with("good-search://gmail/") { hit.jira = jira::metadata(db, &hit.path)?; }
+        if !hit.slack && !hit.notion && !hit.path.starts_with("good-search://gmail/") { hit.jira = jira::metadata(db, &hit.path)?; }
     }
     Ok(())
 }
@@ -176,6 +180,7 @@ pub(crate) fn remote_locations(db: &Connection, hits: &mut [Hit]) -> Result<()> 
 pub mod filters;
 pub mod sorting;
 pub mod attachments;
+pub mod notion;
 pub mod gmail;
 pub mod slack;
 pub mod slack_display;
@@ -256,7 +261,7 @@ pub fn search_filtered(
     let rows = stmt.query_map(rusqlite::params_from_iter(values), |r| {
         Ok(Hit {
             original_url: None,
-            jira: None, gmail: None, timestamp: None, slack: false,
+            jira: None, gmail: None, timestamp: None, notion: false, slack: false,
             path: r.get(0)?,
             name: r.get(1)?,
             snippet: None,

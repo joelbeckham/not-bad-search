@@ -4,6 +4,15 @@ use good_search::bifrost::{Connection, Mcp};
 use serde_json::json;
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
+    if args.get(1).is_some_and(|s|s=="notion-restart") {
+        let dir=std::path::Path::new(args.get(2).context("data directory required")?);
+        let id=args.get(3).context("source ID required")?;
+        let config:good_search::Config=toml::from_str(&std::fs::read_to_string(dir.join("config.toml"))?)?;
+        anyhow::ensure!(config.sources.iter().any(|s|&s.id==id&&s.kind==good_search::sources::SourceKind::Notion),"Not a configured Notion source");
+        let db=good_search::open_writer(&dir.join("index.sqlite"))?;
+        db.execute("UPDATE remote_sync SET run_id=NULL,next_token=NULL,last_success=NULL,retry_at=0,failures=0,error='' WHERE source_id=?1",[id])?;
+        println!("Notion source scheduled for fresh traversal; indexed content retained");return Ok(());
+    }
     if args.get(1).is_some_and(|s| s == "status") {
         let path = std::path::Path::new(args.get(2).context("Data directory required")?);
         let db = good_search::open_reader(&path.join("index.sqlite"))?;
@@ -191,6 +200,19 @@ fn main() -> Result<()> {
         for row in formats.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?)))? {println!("Stored format: {:?}",row?);}
         return Ok(());
     }
+    if args.get(1).is_some_and(|s|s=="notion-smoke") {
+        let dir=std::path::Path::new(args.get(2).context("new smoke directory required")?);
+        anyhow::ensure!(!dir.exists(),"Use a new smoke directory");std::fs::create_dir_all(dir)?;
+        let mut db=good_search::open_db(&dir.join("index.sqlite"))?;
+        let settings=good_search::notion::Settings{pages:args.get(3).context("root page required")?.clone(),..Default::default()};
+        let outcome=good_search::notion::sync(&mut db,"notion-smoke",&settings,&mut m,&dir.join("attachments"),true,||false)?;
+        let mut source=good_search::sources::Source::notion_source();source.id="notion-smoke".into();source.notion=Some(settings);source.paused=false;
+        good_search::images::discover(&mut db,&good_search::Config{sources:vec![source],..Default::default()})?;
+        let counts:(i64,i64,i64)=db.query_row("SELECT (SELECT count(*) FROM remote_items),(SELECT count(*) FROM attachments),(SELECT count(*) FROM image_jobs)",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+        println!("Notion smoke: {outcome:?}; {} pages, {} cached images, {} image jobs",counts.0,counts.1,counts.2);return Ok(());
+    }
+    if args.get(1).is_some_and(|s|s=="notion-probe") { let tool=args.get(2).context("tool")?; let argument=args.get(3).context("arguments")?; let input=if let Some(path)=argument.strip_prefix("@") {std::fs::read_to_string(path)?}else{argument.clone()}; println!("{}",serde_json::to_string_pretty(&m.notion_read(tool,serde_json::from_str(&input)?)?)?);return Ok(()); }
+    if args.get(1).is_some_and(|s| s == "notion-catalog") { for name in m.discovered_tools().iter().filter(|n|n.to_lowercase().contains("notion")) { println!("{}: {}",name,m.v2_catalog()[name]); } return Ok(()); }
     if args.get(1).is_some_and(|s| s == "discovery") {
         for name in m.discovered_tools() {
             if name.starts_with("jira-") || name.starts_with("jira_v2") {

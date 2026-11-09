@@ -232,7 +232,7 @@ fn publish_rejects_changed_chunks_and_invalid_vectors() -> Result<()> {
 fn hybrid_ranking_protects_exact_names_quotes_and_deduplicates() {
     let hit = |name: &str| Hit {
         original_url: None,
-        jira: None, gmail: None, timestamp: None, slack: false,
+        jira: None, gmail: None, timestamp: None, notion: false, slack: false,
         path: format!("C:/{name}"),
         name: name.into(),
         snippet: None,

@@ -28,6 +28,27 @@ pub(super) struct State {
     error: String,
 }
 impl App {
+    fn draw_notion_source(&mut self,ui:&mut egui::Ui,index:usize) {
+        let saved_paused=self.shared_config.lock().unwrap().sources.iter().find(|s|s.id==self.config.sources[index].id).map(|s|s.paused);
+        let source=&mut self.config.sources[index];ui.heading(&source.name);ui.weak("Notion through Bifrost · read-only");
+        source_status_card(ui,self.source_settings.stats.iter().find(|s|s.id==source.id),&mut source.paused,saved_paused);
+        ui.label("Name");ui.text_edit_singleline(&mut source.name);
+        let settings=source.notion.get_or_insert_with(Default::default);
+        ui.label("Root page URLs or IDs — one per line");ui.add(egui::TextEdit::multiline(&mut settings.pages).desired_rows(3).desired_width(f32::INFINITY));
+        ui.label("Teamspace names or IDs — one per line");ui.add(egui::TextEdit::multiline(&mut settings.teamspaces).desired_rows(2).desired_width(f32::INFINITY));
+        ui.weak("Includes child pages and database pages under each root, and accessible pages in each teamspace. Duplicate pages within a source are indexed once.");
+        ui.horizontal(|ui|{ui.label("Poll every");ui.add(egui::DragValue::new(&mut settings.poll_seconds).range(30..=86400).suffix(" seconds"));});
+        ui.checkbox(&mut source.images,"Index images: text and descriptions");
+        ui.weak("Uses the image settings in Processing. Supports uploaded or public HTTPS PNG, JPEG and WebP images up to 10 MiB.");
+        ui.weak("Databases are enumerated directly using the query tool. Teamspace discovery still uses search and reports incomplete if a single creation day reaches its 50-result cap; use page roots in that case.");
+        if ui.button("Restart traversal on next save").clicked(){settings.reload_generation=settings.reload_generation.saturating_add(1);}
+        ui.weak("Deleted or inaccessible pages retain their last local copy until the source is removed. Image download or access errors are shown in sync status.");
+        ui.horizontal(|ui|{
+            if ui.button("Sync enabled sources now").clicked(){let _=self.remote_wake.try_send(());self.source_settings.checked=None;}
+            if ui.button("Remove source").clicked(){self.config.sources.remove(index);self.source_settings.selected=None;}
+        });
+        ui.weak("Uses the shared Bifrost connection in Processing. Save changes to apply.");
+    }
     fn draw_gmail_source(&mut self, ui:&mut egui::Ui,index:usize) {
         let saved_paused=self.shared_config.lock().unwrap().sources.iter().find(|s|s.id==self.config.sources[index].id).map(|s|s.paused);
         let source=&mut self.config.sources[index];
@@ -347,6 +368,7 @@ impl App {
                 self.source_settings.selected = None;
                 return;
             };
+            if self.config.sources[index].kind == good_search::sources::SourceKind::Notion { self.draw_notion_source(ui,index); return; }
             if self.config.sources[index].kind == good_search::sources::SourceKind::Gmail { self.draw_gmail_source(ui,index); return; }
             if self.config.sources[index].kind == good_search::sources::SourceKind::Slack {
                 self.draw_slack_source(ui,index); return;
@@ -445,6 +467,7 @@ impl App {
                 self.source_settings.selected = Some(source.id.clone());
                 self.config.sources.push(source);
             }
+            if ui.button("+ Add Notion").clicked() {let source=Source::notion_source();self.source_settings.selected=Some(source.id.clone());self.config.sources.push(source);}
             if ui.button("+ Add Gmail").clicked() { let source=Source::gmail_source(); self.source_settings.selected=Some(source.id.clone()); self.config.sources.push(source); }
             if ui.button("+ Add Slack").clicked() {
                 let source=Source::slack_source(); self.source_settings.selected=Some(source.id.clone()); self.config.sources.push(source);
@@ -496,7 +519,7 @@ impl App {
                         }
                         ui.weak(source.label());
                     });
-                    ui.label(if let Some(gmail)=&source.gmail { format!("{} Â· since {}",gmail.query,gmail.since) } else if let Some(slack)=&source.slack {
+                    ui.label(if let Some(notion)=&source.notion { format!("{} page roots · {} teamspaces",notion.pages.lines().filter(|s|!s.trim().is_empty()).count(),notion.teamspaces.lines().filter(|s|!s.trim().is_empty()).count()) } else if let Some(gmail)=&source.gmail { format!("{} Â· since {}",gmail.query,gmail.since) } else if let Some(slack)=&source.slack {
                         format!("{} · {}",slack.workspace,slack.channel)
                     } else if source.is_folder() {
                         source.path.to_string_lossy().into_owned()

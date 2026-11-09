@@ -197,7 +197,7 @@ pub(crate) fn search_content(
             };
             hits.push(Hit {
                 original_url: None,
-                jira: None, gmail: None, timestamp: None, slack: false,
+                jira: None, gmail: None, timestamp: None, notion: false, slack: false,
                 path,
                 name: row.get(1)?,
                 snippet: Some(format!(

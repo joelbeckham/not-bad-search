@@ -56,7 +56,7 @@ impl App {
                 };
             }
             ui.separator();
-            for (kind, label) in [(good_search::sources::SourceKind::Folder, "Folders"), (good_search::sources::SourceKind::Jira, "Jira"), (good_search::sources::SourceKind::Slack, "Slack"), (good_search::sources::SourceKind::Gmail, "Gmail")] {
+            for (kind, label) in [(good_search::sources::SourceKind::Folder, "Folders"), (good_search::sources::SourceKind::Jira, "Jira"), (good_search::sources::SourceKind::Slack, "Slack"), (good_search::sources::SourceKind::Gmail, "Gmail"), (good_search::sources::SourceKind::Notion, "Notion")] {
                 let group: Vec<_> = sources.iter().filter(|s| s.kind == kind).collect();
                 if group.is_empty() {
                     continue;

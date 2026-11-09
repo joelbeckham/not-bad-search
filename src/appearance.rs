@@ -304,7 +304,7 @@ impl App {
                                 rect.min + Vec2::new(14., 18.),
                                 Vec2::splat(22.),
                             );
-                            let (uri, bytes) = if hit.path.starts_with("good-search://gmail/") {
+                            let (uri, bytes) = if hit.path.starts_with("good-search://notion/") {good_search::file_icons::notion_icon()} else if hit.path.starts_with("good-search://gmail/") {
                                 good_search::file_icons::gmail_icon()
                             } else if hit.path.starts_with("good-search://slack/") {
                                 good_search::file_icons::slack_icon()
@@ -321,7 +321,7 @@ impl App {
                                 .extension()
                                 .and_then(|s| s.to_str())
                                 .unwrap_or("file");
-                            let ext: String = if hit.path.starts_with("good-search://gmail/") { "GMAIL".into() } else if hit.slack { "SLACK".into() } else if hit.original_url.is_some() { "JIRA".into() } else {
+                            let ext: String = if hit.notion {"NOTION".into()} else if hit.path.starts_with("good-search://gmail/") { "GMAIL".into() } else if hit.slack { "SLACK".into() } else if hit.original_url.is_some() { "JIRA".into() } else {
                                 ext.chars().take(8).collect::<String>().to_uppercase() };
                             let text_rect = egui::Rect::from_min_max(
                                 rect.min + Vec2::new(48., 8.),

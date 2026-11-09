@@ -86,3 +86,7 @@ pub fn slack_icon() -> (&'static str, &'static [u8]) {
 pub fn gmail_icon() -> (&'static str, &'static [u8]) {
     ("bytes://gmail.svg", br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 19V6l9 7 9-7v13" fill="none" stroke="#ea4335" stroke-width="3" stroke-linejoin="round"/><path d="M3 19V7" stroke="#4285f4" stroke-width="3"/><path d="M21 19V7" stroke="#34a853" stroke-width="3"/></svg>"##)
 }
+
+pub fn notion_icon() -> (&'static str, &'static [u8]) {
+ ("bytes://notion.svg",br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="3" fill="#f5f5f5"/><path d="M7 18V6h3l7 12V6M5 6h6M14 6h5M5 18h5" fill="none" stroke="#222" stroke-width="2"/></svg>"##)
+}
