@@ -28,6 +28,8 @@ The configuration and index live in `%LOCALAPPDATA%\GoodSearch` on Windows. `GOO
 
 ## Build and test on Windows
 
+Run these commands from the repository root. The Windows desktop app and the PowerToys Command Palette extension have separate build steps; see [Extensions](#extensions) below.
+
 The development toolchain used here is Rust 1.99.1, target `x86_64-pc-windows-gnu`, with portable w64devkit 2.11.0. Both are installed under `.tools` in this checkout. No WSL compilation is used.
 
 ```powershell
@@ -54,6 +56,32 @@ powershell -ExecutionPolicy Bypass -File scripts\watch-smoke.ps1 -Distro Ubuntu-
 The benchmark requires a new database filename. UI diagnostics log query text only when `GOOD_SEARCH_TRACE` is explicitly set, into the isolated data directory. The smoke script enables this temporarily. Normal app use has no query log.
 
 `GOOD_SEARCH_WORKER_TRACE` separately enables detailed query submission/completion/acceptance logging for diagnosing timing issues. Leave it unset during latency tests: additional disk writes can affect the race being investigated.
+
+## Extensions
+
+### PowerToys Command Palette
+
+The [Command Palette extension](extensions/GoodSearch.CommandPalette/README.md) provides a C# search interface for PowerToys on Windows 11, with result actions and text/image previews supplied by the Rust backend. It requires PowerToys Command Palette and the .NET 10 SDK. From the repository root:
+
+```powershell
+# Install the project-local .NET SDK, then build the extension.
+powershell -ExecutionPolicy Bypass -File extensions\GoodSearch.CommandPalette\bootstrap.ps1
+powershell -ExecutionPolicy Bypass -File extensions\GoodSearch.CommandPalette\build.ps1
+```
+
+The output is `extensions\GoodSearch.CommandPalette\AppPackages\x64`. Pass `-Architecture ARM64` to build for ARM64. To register the extension for the current user, enable Windows Developer Mode and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File extensions\GoodSearch.CommandPalette\build.ps1 -Register
+```
+
+Keep the output folder in place and run **Reload** in Command Palette. See the [extension README](extensions/GoodSearch.CommandPalette/README.md) for configuration, tests, and removal instructions. This produces a development package layout, not a signed distributable MSIX.
+
+**Backend integration is pending:** the extension expects the [named-pipe IPC contract](extensions/GoodSearch.CommandPalette/IPC-CONTRACT.md), which the Rust app in this checkout does not yet implement. It builds, but searches show a backend-unavailable message until that integration is added. The extension does not read SQLite directly or launch the backend.
+
+### Chrome
+
+This checkout does not currently contain a Chrome extension, a Chrome extension manifest, or Chrome build/package scripts. The PowerToys extension above is a Windows integration, not a browser extension. Chrome build and installation instructions need to accompany the Chrome extension source when it is added to this repository.
 
 ## Architecture and current bounds
 
