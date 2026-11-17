@@ -113,7 +113,7 @@ impl Mcp {
             discovered_tools: Vec::new(),
             discovered_schemas: HashMap::new(),
         };
-        let result=m.rpc("initialize",json!({"protocolVersion":m.protocol,"capabilities":{},"clientInfo":{"name":"Good Search","version":"0.1.0"}}),false)?;
+        let result=m.rpc("initialize",json!({"protocolVersion":m.protocol,"capabilities":{},"clientInfo":{"name":"Not Bad Search","version":"0.1.0"}}),false)?;
         m.protocol = result["protocolVersion"]
             .as_str()
             .context("MCP initialization omitted protocolVersion")?

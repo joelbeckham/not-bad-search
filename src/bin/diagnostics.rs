@@ -1,6 +1,6 @@
 //! Console diagnostics: exercises the same database/search and notify backend as the app.
 use anyhow::{Context, Result};
-use good_search::{open_db, reconcile, search, Config};
+use not_bad_search::{open_db, reconcile, search, Config};
 use notify::Watcher;
 use std::{
     path::Path,
@@ -11,25 +11,25 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("semantic-status") => {
-            let db = good_search::open_reader(Path::new(
+            let db = not_bad_search::open_reader(Path::new(
                 args.get(2).context("Database path required")?,
             ))?;
             let chunks:i64=db.query_row("SELECT count(*) FROM chunks c JOIN documents d ON d.id=c.document_id WHERE d.status='ready'",[],|r|r.get(0))?;
             let vectors: i64 = db.query_row(
                 "SELECT count(*) FROM embeddings WHERE model=?1",
-                [good_search::semantic::MODEL],
+                [not_bad_search::semantic::MODEL],
                 |r| r.get(0),
             )?;
             println!(
                 "semantic_chunks={vectors}/{chunks} model={}",
-                good_search::semantic::MODEL
+                not_bad_search::semantic::MODEL
             );
         }
         Some("image-status") => {
-            let db = good_search::open_reader(Path::new(
+            let db = not_bad_search::open_reader(Path::new(
                 args.get(2).context("Database path required")?,
             ))?;
-            println!("{}", good_search::images::summary(&db)?);
+            println!("{}", not_bad_search::images::summary(&db)?);
             let count: i64 = db.query_row(
                 "SELECT count(*) FROM documents WHERE kind IN ('image_text','image_description')",
                 [],
@@ -39,7 +39,7 @@ fn main() -> Result<()> {
         }
         Some("store-key-file") => {
             let key = std::fs::read_to_string(args.get(2).context("Private key file required")?)?;
-            good_search::credentials::save(&key)?;
+            not_bad_search::credentials::save(&key)?;
             println!("API key stored in Windows Credential Manager");
         }
         Some("image-test") => {
@@ -57,9 +57,9 @@ fn main() -> Result<()> {
             };
             let mut db = open_db(path)?;
             reconcile(&mut db, &config)?;
-            let client = good_search::images::OpenAi::new()?;
-            good_search::images::process_one(&mut db, &client, || config.clone())?;
-            println!("{}", good_search::images::summary(&db)?);
+            let client = not_bad_search::images::OpenAi::new()?;
+            not_bad_search::images::process_one(&mut db, &client, || config.clone())?;
+            println!("{}", not_bad_search::images::summary(&db)?);
             let count: i64 = db.query_row(
                 "SELECT count(*) FROM documents WHERE kind IN ('image_text','image_description')",
                 [],

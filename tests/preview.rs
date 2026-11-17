@@ -1,4 +1,4 @@
-use good_search::preview::{load, Content, TEXT_LIMIT};
+use not_bad_search::preview::{load, Content, TEXT_LIMIT};
 
 #[test]
 fn text_preview_matches_unicode_phrases_and_bounds() -> anyhow::Result<()> {

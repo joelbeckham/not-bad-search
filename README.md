@@ -1,4 +1,4 @@
-# Good Search
+# Not Bad Search
 
 A Windows 11 filename and text search launcher in Rust, SQLite, and egui/eframe. The window is rendered with OpenGL; there is no webview or local web server. This is the first working slice, not an installer or a Windows Search replacement.
 
@@ -6,25 +6,25 @@ A Windows 11 filename and text search launcher in Rust, SQLite, and egui/eframe.
 
 Jira summaries and descriptions can also be imported through Bifrost with a scoped JQL source. See [Jira setup, synchronization and limitations](docs/jira-source.md). Remote searches and previews use the local index. Gmail conversations can also be imported through Bifrost; see [Gmail setup and limitations](docs/gmail-source.md).
 
-Launch `target\release\good-search.exe`. On first launch, enter the folders to index in Settings and choose **Save changes**. Nothing is indexed until you select folders.
+Launch `target\release\not-bad-search.exe`. On first launch, enter the folders to index in Settings and choose **Save changes**. Nothing is indexed until you select folders.
 
 - **Ctrl+Alt+Space** shows and focuses the search window globally.
-- Opening Good Search again reopens its existing window, including when hidden. Only one instance runs per data directory.
+- Opening Not Bad Search again reopens its existing window, including when hidden. Only one instance runs per data directory.
 - The borderless window keeps results full width, with Settings and key hints in the footer. The window centers in the mouse pointer monitor's work area on startup, hotkey activation, and reopening an existing instance.
 - Search terms are combined with AND: `project budget` finds both, in either order. Quotes group phrases: `"project budget" approval` requires the phrase plus approval. An unfinished quote extends to the end of input. Content terms must occur in the same chunk; filename terms are literal substrings. A single one/two-character filename term still uses prefix matching. Matching is case insensitive; content phrases follow token boundaries rather than exact punctuation. Other operators and wildcard syntax are treated literally.
 - While the current query is pending, the window shows **Searching...**. **No results** appears only after that query completes. Clearing the search clears results immediately.
 - Ctrl+C, Ctrl+X, and Ctrl+V use the Windows clipboard in Search, Selected folders, and Exclusions.
 - Up/down select a result. Enter or a click opens a full-window preview; Ctrl+Enter opens the file directly. In preview, Up/Down browse results, Enter opens the current file in its default application, and Escape returns to the list. The scroll wheel scrolls preview content.
 - Ctrl+, opens Settings from search or Indexed data. Back/Escape returns to the previous screen.
-- Escape returns from Settings, Indexed data or Preview to the previous screen, clears a nonempty search, or hides an empty search window. Alt+F4 hides the window. **Settings > Quit Good Search** exits the process.
+- Escape returns from Settings, Indexed data or Preview to the previous screen, clears a nonempty search, or hides an empty search window. Alt+F4 hides the window. **Settings > Quit Not Bad Search** exits the process.
 - If another program owns the hotkey, the app displays an error and keeps normal close behavior so it remains usable.
-- Escape on an empty search still hides the window when the hotkey is unavailable; launch Good Search again to recover the hidden window.
+- Escape on an empty search still hides the window when the hotkey is unavailable; launch Not Bad Search again to recover the hidden window.
 
 Settings accept one absolute folder per line, including `C:\Users\you\Documents` and `\\wsl.localhost\Ubuntu-24.04\home\you\notes`. Use the distribution name shown by `wsl --list --quiet`.
 
 Exclusions are globs matched against each basename and slash-separated path relative to a selected folder. Examples: `.git`, `node_modules`, `*.tmp`, `private/**`. Matching is case insensitive, including WSL. Excluded directories are pruned. Symbolic links and junctions are not followed. Paths with invalid Unicode produce a scan error rather than silently corrupting filenames.
 
-The configuration and index live in `%LOCALAPPDATA%\GoodSearch` on Windows. `GOOD_SEARCH_DATA` can override that with an absolute local Windows directory for isolated tests. The database directory is excluded from indexing. Text indexing is opt-in under Settings / Search text inside files for each selected folder. It supports UTF-8 `.md`, `.markdown`, and `.txt`, with a configurable 2 MiB default size cap. Enabled content is stored locally in SQLite. Filename matches appear first, followed by text matches with excerpts. Text-file indexing and all searches remain local. Optional image indexing sends opted-in images to OpenAI; credentials live in Windows Credential Manager.
+The configuration and index live in `%LOCALAPPDATA%\NotBadSearch` on Windows. `NOT_BAD_SEARCH_DATA` can override that with an absolute local Windows directory for isolated tests. The database directory is excluded from indexing. Text indexing is opt-in under Settings / Search text inside files for each selected folder. It supports UTF-8 `.md`, `.markdown`, and `.txt`, with a configurable 2 MiB default size cap. Enabled content is stored locally in SQLite. Filename matches appear first, followed by text matches with excerpts. Text-file indexing and all searches remain local. Optional image indexing sends opted-in images to OpenAI; credentials live in Windows Credential Manager.
 
 ## Build and test on Windows
 
@@ -37,47 +37,47 @@ The development toolchain used here is Rust 1.99.1, target `x86_64-pc-windows-gn
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 cargo build --locked --release
-.\target\release\good-search.exe
+.\target\release\not-bad-search.exe
 ```
 
 For a new checkout, install Rust for Windows with a C linker (MSVC Build Tools or GNU MinGW). `scripts/env.ps1` is specifically for the project-local GNU toolchain; it enables Rust's self-contained runtime libraries. The app bundles SQLite; users do not install SQLite or Rust to run the executable.
 
-Integration diagnostics require an interactive Windows desktop. They launch an isolated test instance, send real keyboard input, then stop only that instance. Avoid typing during the test. Close other Good Search instances first.
+Integration diagnostics require an interactive Windows desktop. They launch an isolated test instance, send real keyboard input, then stop only that instance. Avoid typing during the test. Close other Not Bad Search instances first.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\ui-smoke.ps1
-powershell -STA -ExecutionPolicy Bypass -File scripts\clipboard-smoke.ps1 -Exe .\target\release\good-search.exe
+powershell -STA -ExecutionPolicy Bypass -File scripts\clipboard-smoke.ps1 -Exe .\target\release\not-bad-search.exe
 powershell -STA -ExecutionPolicy Bypass -File scripts\search-repeat-smoke.ps1 -Rounds 100
 powershell -ExecutionPolicy Bypass -File scripts\watch-smoke.ps1 -Distro Ubuntu-24.04
 .\target\release\diagnostics.exe bench test-data\new-benchmark.sqlite
 .\target\release\diagnostics.exe index test-data\folder.sqlite C:\path\to\fixture
 ```
 
-The benchmark requires a new database filename. UI diagnostics log query text only when `GOOD_SEARCH_TRACE` is explicitly set, into the isolated data directory. The smoke script enables this temporarily. Normal app use has no query log.
+The benchmark requires a new database filename. UI diagnostics log query text only when `NOT_BAD_SEARCH_TRACE` is explicitly set, into the isolated data directory. The smoke script enables this temporarily. Normal app use has no query log.
 
-`GOOD_SEARCH_WORKER_TRACE` separately enables detailed query submission/completion/acceptance logging for diagnosing timing issues. Leave it unset during latency tests: additional disk writes can affect the race being investigated.
+`NOT_BAD_SEARCH_WORKER_TRACE` separately enables detailed query submission/completion/acceptance logging for diagnosing timing issues. Leave it unset during latency tests: additional disk writes can affect the race being investigated.
 
 ## Extensions
 
 ### PowerToys Command Palette
 
-The [Command Palette extension](extensions/GoodSearch.CommandPalette/README.md) provides a C# search interface for PowerToys on Windows 11, with result actions and text/image previews supplied by the Rust backend. It requires PowerToys Command Palette and the .NET 10 SDK. From the repository root:
+The [Command Palette extension](extensions/NotBadSearch.CommandPalette/README.md) provides a C# search interface for PowerToys on Windows 11, with result actions and text/image previews supplied by the Rust backend. It requires PowerToys Command Palette and the .NET 10 SDK. From the repository root:
 
 ```powershell
 # Install the project-local .NET SDK, then build the extension.
-powershell -ExecutionPolicy Bypass -File extensions\GoodSearch.CommandPalette\bootstrap.ps1
-powershell -ExecutionPolicy Bypass -File extensions\GoodSearch.CommandPalette\build.ps1
+powershell -ExecutionPolicy Bypass -File extensions\NotBadSearch.CommandPalette\bootstrap.ps1
+powershell -ExecutionPolicy Bypass -File extensions\NotBadSearch.CommandPalette\build.ps1
 ```
 
-The output is `extensions\GoodSearch.CommandPalette\AppPackages\x64`. Pass `-Architecture ARM64` to build for ARM64. To register the extension for the current user, enable Windows Developer Mode and run:
+The output is `extensions\NotBadSearch.CommandPalette\AppPackages\x64`. Pass `-Architecture ARM64` to build for ARM64. To register the extension for the current user, enable Windows Developer Mode and run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File extensions\GoodSearch.CommandPalette\build.ps1 -Register
+powershell -ExecutionPolicy Bypass -File extensions\NotBadSearch.CommandPalette\build.ps1 -Register
 ```
 
-Keep the output folder in place and run **Reload** in Command Palette. See the [extension README](extensions/GoodSearch.CommandPalette/README.md) for configuration, tests, and removal instructions. This produces a development package layout, not a signed distributable MSIX.
+Keep the output folder in place and run **Reload** in Command Palette. See the [extension README](extensions/NotBadSearch.CommandPalette/README.md) for configuration, tests, and removal instructions. This produces a development package layout, not a signed distributable MSIX.
 
-**Backend integration is pending:** the extension expects the [named-pipe IPC contract](extensions/GoodSearch.CommandPalette/IPC-CONTRACT.md), which the Rust app in this checkout does not yet implement. It builds, but searches show a backend-unavailable message until that integration is added. The extension does not read SQLite directly or launch the backend.
+**Backend integration is pending:** the extension expects the [named-pipe IPC contract](extensions/NotBadSearch.CommandPalette/IPC-CONTRACT.md), which the Rust app in this checkout does not yet implement. It builds, but searches show a backend-unavailable message until that integration is added. The extension does not read SQLite directly or launch the backend.
 
 ### Chrome
 
@@ -133,7 +133,7 @@ The daily cap counts attempted requests (including retries), resets at midnight 
 
 Pause takes effect after saving; an already-sent request may finish and be cached. Removing a folder opt-in removes its indexed image documents and unreferenced cache entries on the next scan. Deletion, exclusions, changed source bytes and changed model/prompt version invalidate image outputs. Duplicate images share cached extraction when hash/model/version match. Scans rehash eligible files, but unchanged images do not trigger new API calls.
 
-The API key is stored as the current Windows user's generic credential `GoodSearch/OpenAI`, shared by isolated Good Search profiles. It is never written to TOML or SQLite. **Remove key** removes that credential. The app requests `store:false` from the Responses API; this is not a claim of zero provider retention. Folder opt-in authorizes uploading image bytes, including embedded metadata. OCR uses OpenAI; embeddings and searches run locally.
+The API key is stored as the current Windows user's generic credential `NotBadSearch/OpenAI`, shared by isolated Not Bad Search profiles. It is never written to TOML or SQLite. **Remove key** removes that credential. The app requests `store:false` from the Responses API; this is not a claim of zero provider retention. Folder opt-in authorizes uploading image bytes, including embedded metadata. OCR uses OpenAI; embeddings and searches run locally.
 
 For a synthetic live API check only (one request maximum): create an image containing the word `marmalade`, then run `diagnostics image-test NEW_DB FIXTURE_FOLDER`. `diagnostics store-key-file PRIVATE_FILE` can import a key without placing its value in command arguments; the app's masked Settings field is the normal setup flow.
 

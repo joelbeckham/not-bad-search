@@ -1,4 +1,4 @@
-param([string]$Exe = "$PSScriptRoot\..\target\clipboard-fix\release\good-search.exe")
+param([string]$Exe = "$PSScriptRoot\..\target\clipboard-fix\release\not-bad-search.exe")
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type @'
@@ -20,7 +20,7 @@ public class ClipboardProbe {
  [DllImport("user32.dll")] public static extern void mouse_event(uint flags,uint x,uint y,uint data,UIntPtr extra);
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
  [DllImport("user32.dll")] public static extern bool GetCursorPos(out Point p);
- public static IntPtr Window(uint pid) {IntPtr found=IntPtr.Zero;EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);if(owner==pid){var s=new System.Text.StringBuilder(256);GetWindowText(h,s,256);if(s.ToString()=="Good Search")found=h;}return true;},IntPtr.Zero);return found;}
+ public static IntPtr Window(uint pid) {IntPtr found=IntPtr.Zero;EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);if(owner==pid){var s=new System.Text.StringBuilder(256);GetWindowText(h,s,256);if(s.ToString()=="Not Bad Search")found=h;}return true;},IntPtr.Zero);return found;}
  public static void Click(IntPtr h,int x,int y) {double scale=GetDpiForWindow(h)/96.0;Rect r;GetWindowRect(h,out r);SetCursorPos(r.L+(int)(x*scale),r.T+(int)(y*scale));mouse_event(2,0,0,0,UIntPtr.Zero);mouse_event(4,0,0,0,UIntPtr.Zero);}
 }
 '@
@@ -38,8 +38,8 @@ $cursor = New-Object ClipboardProbe+Point
 [void][ClipboardProbe]::GetCursorPos([ref]$cursor)
 $data = [IO.Path]::GetFullPath("$PSScriptRoot\..\test-data\clipboard-$([guid]::NewGuid().ToString('N'))")
 New-Item -ItemType Directory -Path $data | Out-Null
-$previousData=$env:GOOD_SEARCH_DATA
-$env:GOOD_SEARCH_DATA=$data
+$previousData=$env:NOT_BAD_SEARCH_DATA
+$env:NOT_BAD_SEARCH_DATA=$data
 $proc=$null
 function Keys([string]$keys) {
  [Windows.Forms.SendKeys]::SendWait($keys)
@@ -82,5 +82,5 @@ try {
  if ($null -ne $proc -and -not $proc.HasExited) {Stop-Process -Id $proc.Id}
  if ($null -ne $original) {[Windows.Forms.Clipboard]::SetDataObject($saved,$true)} else {[Windows.Forms.Clipboard]::Clear()}
  [void][ClipboardProbe]::SetCursorPos($cursor.X,$cursor.Y)
- $env:GOOD_SEARCH_DATA=$previousData
+ $env:NOT_BAD_SEARCH_DATA=$previousData
 }

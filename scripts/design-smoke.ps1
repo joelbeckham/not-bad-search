@@ -1,4 +1,4 @@
-param([string]$Exe="$PSScriptRoot\..\target\clipboard-fix\release\good-search.exe")
+param([string]$Exe="$PSScriptRoot\..\target\clipboard-fix\release\not-bad-search.exe")
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 Add-Type @'
@@ -17,7 +17,7 @@ public class DesignProbe {
  [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
  [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);
- public static IntPtr Find(uint id){IntPtr found=IntPtr.Zero;EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);if(owner==id){var s=new System.Text.StringBuilder(256);GetWindowText(h,s,256);if(s.ToString()=="Good Search")found=h;}return true;},IntPtr.Zero);return found;}
+ public static IntPtr Find(uint id){IntPtr found=IntPtr.Zero;EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);if(owner==id){var s=new System.Text.StringBuilder(256);GetWindowText(h,s,256);if(s.ToString()=="Not Bad Search")found=h;}return true;},IntPtr.Zero);return found;}
  public static void Click(IntPtr h,int x,int y){Rect r;GetWindowRect(h,out r);double scale=GetDpiForWindow(h)/96.0;SetCursorPos(r.L+(int)(x*scale),r.T+(int)(y*scale));mouse_event(2,0,0,0,UIntPtr.Zero);mouse_event(4,0,0,0,UIntPtr.Zero);}
 }
 '@
@@ -31,8 +31,8 @@ folders = ['$files']
 exclusions = ['*.tmp', 'node_modules']
 reconcile_seconds = 3600
 "@ | Set-Content "$data\config.toml"
-$old=$env:GOOD_SEARCH_DATA;$env:GOOD_SEARCH_DATA=$data
-$oldTrace=$env:GOOD_SEARCH_TRACE;$env:GOOD_SEARCH_TRACE='1'
+$old=$env:NOT_BAD_SEARCH_DATA;$env:NOT_BAD_SEARCH_DATA=$data
+$oldTrace=$env:NOT_BAD_SEARCH_TRACE;$env:NOT_BAD_SEARCH_TRACE='1'
 $proc=Start-Process -FilePath $Exe -PassThru
 function Capture([string]$name){
  if([DesignProbe]::GetForegroundWindow() -ne $script:h){throw 'Test window lost focus; refusing to capture another app'}
@@ -70,4 +70,4 @@ try {
  if($after.L -eq $before.L -and $after.T -eq $before.T){throw 'Search icon did not drag the window'}
  Write-Output 'Search icon window dragging: PASS'
  Write-Output "Window captures for visual inspection: $base"
-} finally {if(-not $proc.HasExited){Stop-Process -Id $proc.Id};$env:GOOD_SEARCH_DATA=$old;$env:GOOD_SEARCH_TRACE=$oldTrace}
+} finally {if(-not $proc.HasExited){Stop-Process -Id $proc.Id};$env:NOT_BAD_SEARCH_DATA=$old;$env:NOT_BAD_SEARCH_TRACE=$oldTrace}

@@ -14,8 +14,8 @@ impl App {
         let selected = path.clone();
         std::thread::spawn(move || {
             let result = (|| {
-                let mut db = good_search::open_reader(&database)?;
-                good_search::inspection::inspect(&mut db, &selected)
+                let mut db = not_bad_search::open_reader(&database)?;
+                not_bad_search::inspection::inspect(&mut db, &selected)
             })();
             let _ = sender.send(result.map_err(|e: anyhow::Error| format!("{e:#}")));
         });

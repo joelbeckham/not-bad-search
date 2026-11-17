@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use windows_sys::Win32::Security::Credentials::*;
 
 fn target(name: &str) -> Vec<u16> {
-    format!("GoodSearch/{name}\0").encode_utf16().collect()
+    format!("NotBadSearch/{name}\0").encode_utf16().collect()
 }
 
 pub fn load() -> Result<Option<String>> {
@@ -41,7 +41,7 @@ pub fn save_named(name: &str, key: &str) -> Result<()> {
         bail!("Invalid API key");
     }
     let mut target = target(name);
-    let mut user: Vec<u16> = "Good Search\0".encode_utf16().collect();
+    let mut user: Vec<u16> = "Not Bad Search\0".encode_utf16().collect();
     let credential = CREDENTIALW {
         Type: CRED_TYPE_GENERIC,
         TargetName: target.as_mut_ptr(),

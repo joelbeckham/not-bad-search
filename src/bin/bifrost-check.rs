@@ -1,22 +1,22 @@
 //! Explicit console connection probe. Never prints credentials or endpoint.
 use anyhow::{Context, Result};
-use good_search::bifrost::{Connection, Mcp};
+use not_bad_search::bifrost::{Connection, Mcp};
 use serde_json::json;
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
     if args.get(1).is_some_and(|s|s=="notion-restart"||s=="slack-restart") {
         let dir=std::path::Path::new(args.get(2).context("data directory required")?);
         let id=args.get(3).context("source ID required")?;
-        let config:good_search::Config=toml::from_str(&std::fs::read_to_string(dir.join("config.toml"))?)?;
-        let kind=if args[1]=="slack-restart" {good_search::sources::SourceKind::Slack}else{good_search::sources::SourceKind::Notion};
+        let config:not_bad_search::Config=toml::from_str(&std::fs::read_to_string(dir.join("config.toml"))?)?;
+        let kind=if args[1]=="slack-restart" {not_bad_search::sources::SourceKind::Slack}else{not_bad_search::sources::SourceKind::Notion};
         anyhow::ensure!(config.sources.iter().any(|s|&s.id==id&&s.kind==kind),"Not a configured source of the requested kind");
-        let db=good_search::open_writer(&dir.join("index.sqlite"))?;
+        let db=not_bad_search::open_writer(&dir.join("index.sqlite"))?;
         db.execute("UPDATE remote_sync SET run_id=NULL,next_token=NULL,last_success=NULL,retry_at=0,failures=0,error='' WHERE source_id=?1",[id])?;
         println!("Source scheduled for fresh traversal; indexed content retained");return Ok(());
     }
     if args.get(1).is_some_and(|s| s == "status") {
         let path = std::path::Path::new(args.get(2).context("Data directory required")?);
-        let db = good_search::open_reader(&path.join("index.sqlite"))?;
+        let db = not_bad_search::open_reader(&path.join("index.sqlite"))?;
         let mut statement=db.prepare("SELECT r.issue_key,r.remote_updated,r.synced_at,length(r.raw_content),(SELECT count(*) FROM chunks c JOIN documents d ON d.id=c.document_id WHERE d.file_id=r.file_id),(SELECT count(*) FROM embeddings e JOIN chunks c ON c.id=e.chunk_id JOIN documents d ON d.id=c.document_id WHERE d.file_id=r.file_id) FROM remote_items r ORDER BY r.issue_key")?;
         for row in statement.query_map([], |r| {
             Ok((
@@ -30,9 +30,9 @@ fn main() -> Result<()> {
         })? {
             println!("{:?}", row?);
         }
-        let config: good_search::Config =
+        let config: not_bad_search::Config =
             toml::from_str(&std::fs::read_to_string(path.join("config.toml"))?)?;
-        for status in good_search::sources::snapshot(&db, &config)? {
+        for status in not_bad_search::sources::snapshot(&db, &config)? {
             if let Some(message) = status.remote_status {
                 println!("{message}");
             }
@@ -47,9 +47,9 @@ fn main() -> Result<()> {
     if args.get(1).is_some_and(|s| s == "attach") {
         let from = std::path::Path::new(args.get(2).context("Source test directory required")?);
         let to = std::path::Path::new(args.get(3).context("Destination data directory required")?);
-        let fixture: good_search::Config =
+        let fixture: not_bad_search::Config =
             toml::from_str(&std::fs::read_to_string(from.join("config.toml"))?)?;
-        let mut config: good_search::Config =
+        let mut config: not_bad_search::Config =
             toml::from_str(&std::fs::read_to_string(to.join("config.toml"))?)?;
         config.migrate_sources();
         let mut source = fixture
@@ -71,9 +71,9 @@ fn main() -> Result<()> {
     }
     if args.get(1).is_some_and(|s| s == "verify") {
         let path = std::path::Path::new(args.get(2).context("Data directory required")?);
-        let config: good_search::Config =
+        let config: not_bad_search::Config =
             toml::from_str(&std::fs::read_to_string(path.join("config.toml"))?)?;
-        let mut db = good_search::open_db(&path.join("index.sqlite"))?;
+        let mut db = not_bad_search::open_db(&path.join("index.sqlite"))?;
         let ids = |db: &rusqlite::Connection| -> Result<Vec<i64>> {
             Ok(db
                 .prepare("SELECT id FROM chunks ORDER BY id")?
@@ -83,7 +83,7 @@ fn main() -> Result<()> {
         let before = ids(&db)?;
         let mut m = Mcp::connect(Connection::load()?)?;
         for source in config.sources.iter().filter(|s| !s.is_folder()) {
-            let result = good_search::jira::sync(
+            let result = not_bad_search::jira::sync(
                 &mut db,
                 &source.id,
                 source.jira.as_ref().context("No settings")?,
@@ -96,7 +96,7 @@ fn main() -> Result<()> {
         let mut times = vec![];
         for _ in 0..100 {
             let start = std::time::Instant::now();
-            let hits = good_search::search(&db, "CORE", 100)?;
+            let hits = not_bad_search::search(&db, "CORE", 100)?;
             anyhow::ensure!(
                 hits.len() == 2 && hits.iter().all(|h| h.original_url.is_some()),
                 "Expected two Jira results with original URLs"
@@ -106,15 +106,15 @@ fn main() -> Result<()> {
         times.sort_by(f64::total_cmp);
         println!("Local search ms p50={:.3} p95={:.3}", times[50], times[95]);
         if let Some(model) = args.get(3) {
-            let local = good_search::semantic::LocalModel::load(std::path::Path::new(model))?;
-            while good_search::semantic::index_batch(&mut db, &local, 64)? > 0 {}
-            let mut index = good_search::semantic::VectorIndex::default();
+            let local = not_bad_search::semantic::LocalModel::load(std::path::Path::new(model))?;
+            while not_bad_search::semantic::index_batch(&mut db, &local, 64)? > 0 {}
+            let mut index = not_bad_search::semantic::VectorIndex::default();
             index.refresh(&db)?;
             let query: String =
                 db.query_row("SELECT body FROM chunks ORDER BY id LIMIT 1", [], |r| {
                     r.get(0)
                 })?;
-            let vector = good_search::semantic::embed_query(
+            let vector = not_bad_search::semantic::embed_query(
                 &local,
                 &query.chars().take(180).collect::<String>(),
             )?;
@@ -172,7 +172,7 @@ fn main() -> Result<()> {
         let page=m.call("jira_searchJiraIssuesUsingJql",json!({"cloudId":"bombbomb.atlassian.net","jql":"project = CORE ORDER BY updated ASC","maxResults":50,"fields":["id","key","summary","description","updated"],"searchResultMode":"issues","view":"full","responseContentFormat":"markdown"}))?;
         println!("Page format {}",page["appliedContentFormat"]);
         for key in ["CORE-6","CORE-7"] {
-            use good_search::jira::Provider;
+            use not_bad_search::jira::Provider;
             let value=m.issue(&Default::default(),key)?;
             println!("Detail {key}: format={}, description_null={}",value["appliedContentFormat"],value["fields"]["description"].is_null());
         }
@@ -184,19 +184,19 @@ fn main() -> Result<()> {
     if args.get(1).is_some_and(|s| s == "attachment-test") {
         let path=std::path::Path::new(args.get(2).context("Fixture directory required")?);
         std::fs::create_dir_all(path)?;
-        let mut db=good_search::open_db(&path.join("index.sqlite"))?;
-        let mut source=good_search::sources::Source::jira_source();source.id="attachment-test".into();source.paused=false;
+        let mut db=not_bad_search::open_db(&path.join("index.sqlite"))?;
+        let mut source=not_bad_search::sources::Source::jira_source();source.id="attachment-test".into();source.paused=false;
         let settings=source.jira.as_mut().unwrap();settings.jql="key in (CORE-11116, CORE-11112)".into();settings.page_size=1;
-        println!("Sync: {:?}",good_search::jira::sync(&mut db,&source.id,settings,&mut m,||false)?);
-        good_search::attachments::sync_jira(&mut db,&source.id,settings,&mut m,&path.join("attachments"),||false)?;
-        let config=good_search::Config{sources:vec![source],semantic_enabled:false,..Default::default()};
+        println!("Sync: {:?}",not_bad_search::jira::sync(&mut db,&source.id,settings,&mut m,||false)?);
+        not_bad_search::attachments::sync_jira(&mut db,&source.id,settings,&mut m,&path.join("attachments"),||false)?;
+        let config=not_bad_search::Config{sources:vec![source],semantic_enabled:false,..Default::default()};
         std::fs::write(path.join("config.toml"),toml::to_string_pretty(&config)?)?;
-        good_search::images::discover(&mut db,&config)?;
+        not_bad_search::images::discover(&mut db,&config)?;
         if args.get(3).is_some_and(|s|s=="analyze") {
-            let extractor=good_search::images::OpenAi::new()?;
-            for _ in 0..2 {good_search::images::process_one(&mut db,&extractor,||config.clone())?;}
+            let extractor=not_bad_search::images::OpenAi::new()?;
+            for _ in 0..2 {not_bad_search::images::process_one(&mut db,&extractor,||config.clone())?;}
         }
-        println!("Images: {}",good_search::images::summary(&db)?);
+        println!("Images: {}",not_bad_search::images::summary(&db)?);
         let mut formats=db.prepare("SELECT content_format,count(*) FROM remote_items GROUP BY content_format")?;
         for row in formats.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?)))? {println!("Stored format: {:?}",row?);}
         return Ok(());
@@ -204,11 +204,11 @@ fn main() -> Result<()> {
     if args.get(1).is_some_and(|s|s=="notion-smoke") {
         let dir=std::path::Path::new(args.get(2).context("new smoke directory required")?);
         anyhow::ensure!(!dir.exists(),"Use a new smoke directory");std::fs::create_dir_all(dir)?;
-        let mut db=good_search::open_db(&dir.join("index.sqlite"))?;
-        let settings=good_search::notion::Settings{pages:args.get(3).context("root page required")?.clone(),..Default::default()};
-        let outcome=good_search::notion::sync(&mut db,"notion-smoke",&settings,&mut m,&dir.join("attachments"),true,||false)?;
-        let mut source=good_search::sources::Source::notion_source();source.id="notion-smoke".into();source.notion=Some(settings);source.paused=false;
-        good_search::images::discover(&mut db,&good_search::Config{sources:vec![source],..Default::default()})?;
+        let mut db=not_bad_search::open_db(&dir.join("index.sqlite"))?;
+        let settings=not_bad_search::notion::Settings{pages:args.get(3).context("root page required")?.clone(),..Default::default()};
+        let outcome=not_bad_search::notion::sync(&mut db,"notion-smoke",&settings,&mut m,&dir.join("attachments"),true,||false)?;
+        let mut source=not_bad_search::sources::Source::notion_source();source.id="notion-smoke".into();source.notion=Some(settings);source.paused=false;
+        not_bad_search::images::discover(&mut db,&not_bad_search::Config{sources:vec![source],..Default::default()})?;
         let counts:(i64,i64,i64)=db.query_row("SELECT (SELECT count(*) FROM remote_items),(SELECT count(*) FROM attachments),(SELECT count(*) FROM image_jobs)",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
         println!("Notion smoke: {outcome:?}; {} pages, {} cached images, {} image jobs",counts.0,counts.1,counts.2);return Ok(());
     }
@@ -226,18 +226,18 @@ fn main() -> Result<()> {
         let dir=std::path::Path::new(args.get(2).context("New fixture directory required")?);
         anyhow::ensure!(!dir.exists(),"Fixture directory already exists");
         std::fs::create_dir_all(dir)?;
-        let settings=good_search::slack::Settings {channel:args.get(3).context("Channel required")?.clone(),workspace:args.get(4).context("Workspace URL required")?.clone(),since:args.get(5).context("Start date required")?.clone(),poll_seconds:300,..Default::default()};
-        let mut db=good_search::open_db(&dir.join("index.sqlite"))?;
-        let outcome=good_search::slack::sync(&mut db,"slack-smoke",&settings,&mut m,||false)?;
-        good_search::slack::sync_images(&mut db,"slack-smoke",&mut m,&dir.join("attachments"),||false)?;
+        let settings=not_bad_search::slack::Settings {channel:args.get(3).context("Channel required")?.clone(),workspace:args.get(4).context("Workspace URL required")?.clone(),since:args.get(5).context("Start date required")?.clone(),poll_seconds:300,..Default::default()};
+        let mut db=not_bad_search::open_db(&dir.join("index.sqlite"))?;
+        let outcome=not_bad_search::slack::sync(&mut db,"slack-smoke",&settings,&mut m,||false)?;
+        not_bad_search::slack::sync_images(&mut db,"slack-smoke",&mut m,&dir.join("attachments"),||false)?;
         let counts:(i64,i64)=db.query_row("SELECT (SELECT count(*) FROM remote_items),(SELECT count(*) FROM attachments)",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
         let threads:i64=db.query_row("SELECT count(*) FROM remote_items WHERE json_array_length(raw_content,'$.messages')>1",[],|r|r.get(0))?;
         println!("Slack sync {outcome:?}; {} conversations ({threads} with replies), {} cached images",counts.0,counts.1);
         return Ok(());
     }
     if args.get(1).is_some_and(|s|s=="gmail-smoke") {
-        struct Bounded(good_search::bifrost::Mcp);
-        impl good_search::gmail::Provider for Bounded {
+        struct Bounded(not_bad_search::bifrost::Mcp);
+        impl not_bad_search::gmail::Provider for Bounded {
             fn read(&mut self,tool:&str,mut args:serde_json::Value)->Result<serde_json::Value> {
                 if tool=="search_threads" {args["pageSize"]=serde_json::json!(1);}
                 let mut value=self.0.gmail_read(tool,args)?;
@@ -245,8 +245,8 @@ fn main() -> Result<()> {
                 Ok(value)
             }
         }
-        let mut db=good_search::open_db(std::path::Path::new(":memory:"))?;
-        let result=good_search::gmail::sync(&mut db,"smoke",&Default::default(),&mut Bounded(m),||false)?;
+        let mut db=not_bad_search::open_db(std::path::Path::new(":memory:"))?;
+        let result=not_bad_search::gmail::sync(&mut db,"smoke",&Default::default(),&mut Bounded(m),||false)?;
         let (items,chunks):(i64,i64)=db.query_row("SELECT (SELECT count(*) FROM remote_items),(SELECT count(*) FROM chunks)",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
         println!("Gmail bounded smoke: {result:?}; {items} conversations; {chunks} searchable chunks");return Ok(());
     }
@@ -432,21 +432,21 @@ fn main() -> Result<()> {
                     && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')),
             "Expected two CORE issue keys"
         );
-        let mut source = good_search::sources::Source::jira_source();
+        let mut source = not_bad_search::sources::Source::jira_source();
         source.name = "CORE · Jira test".into();
         let settings = source.jira.as_mut().unwrap();
         settings.jql = format!("key in ({})", keys.join(", "));
         settings.page_size = 1;
         println!("Pinned JQL: {}", settings.jql);
         std::fs::create_dir_all(path)?;
-        let config = good_search::Config {
+        let config = not_bad_search::Config {
             sources: vec![source.clone()],
             semantic_enabled: false,
             ..Default::default()
         };
         std::fs::write(path.join("config.toml"), toml::to_string_pretty(&config)?)?;
-        let mut db = good_search::open_db(&path.join("index.sqlite"))?;
-        let result = good_search::jira::sync(
+        let mut db = not_bad_search::open_db(&path.join("index.sqlite"))?;
+        let result = not_bad_search::jira::sync(
             &mut db,
             &source.id,
             source.jira.as_ref().unwrap(),
@@ -462,16 +462,16 @@ fn main() -> Result<()> {
 fn fixture(path: &std::path::Path) -> Result<()> {
     anyhow::ensure!(!path.exists(), "Use a new fixture directory");
     std::fs::create_dir_all(path)?;
-    let mut source = good_search::sources::Source::jira_source();
+    let mut source = not_bad_search::sources::Source::jira_source();
     source.id = "jira-fixture".into();
     source.name = "CORE test issues".into();
     source.jira.as_mut().unwrap().jql = "key in (CORE-1, CORE-2)".into();
-    let mut db = good_search::open_db(&path.join("index.sqlite"))?;
+    let mut db = not_bad_search::open_db(&path.join("index.sqlite"))?;
     struct Fixture;
-    impl good_search::jira::Provider for Fixture {
+    impl not_bad_search::jira::Provider for Fixture {
         fn page(
             &mut self,
-            _: &good_search::jira::Settings,
+            _: &not_bad_search::jira::Settings,
             _: &str,
             _: Option<&str>,
         ) -> Result<serde_json::Value> {
@@ -479,18 +479,18 @@ fn fixture(path: &std::path::Path) -> Result<()> {
                 json!({"isLast":true,"issues":([1,2].into_iter().map(|id|json!({"id":id.to_string(),"key":format!("CORE-{id}"),"fields":{"summary":format!("Jira synthetic preview {id}"),"updated":"2026-11-06T12:00:00Z","description":{"version":1,"type":"doc","content":[{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Local Jira content"}]},{"type":"paragraph","content":[{"type":"text","text":"This synthetic issue tests local search, preview, metadata inspection and Jira source settings."}]},{"type":"paragraph","content":[{"type":"text","text":"Reference","marks":[{"type":"link","attrs":{"href":"https://example.com/reference"}}]}]}]}}})).collect::<Vec<_>>())}),
             )
         }
-        fn issue(&mut self, _: &good_search::jira::Settings, _: &str) -> Result<serde_json::Value> {
+        fn issue(&mut self, _: &not_bad_search::jira::Settings, _: &str) -> Result<serde_json::Value> {
             anyhow::bail!("Fixture descriptions are already ADF")
         }
     }
-    good_search::jira::sync(
+    not_bad_search::jira::sync(
         &mut db,
         &source.id,
         source.jira.as_ref().unwrap(),
         &mut Fixture,
         || false,
     )?;
-    let config = good_search::Config {
+    let config = not_bad_search::Config {
         sources: vec![source],
         semantic_enabled: false,
         ..Default::default()

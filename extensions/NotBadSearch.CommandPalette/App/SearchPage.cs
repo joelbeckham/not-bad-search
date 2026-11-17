@@ -1,8 +1,8 @@
-using GoodSearch.Core;
+using NotBadSearch.Core;
 using Microsoft.CommandPalette.Extensions;
 using Microsoft.CommandPalette.Extensions.Toolkit;
 
-namespace GoodSearch.CommandPalette;
+namespace NotBadSearch.CommandPalette;
 
 internal sealed partial class SearchPage : DynamicListPage, IDisposable
 {
@@ -17,7 +17,7 @@ internal sealed partial class SearchPage : DynamicListPage, IDisposable
     public SearchPage(ISearchBackend backend)
     {
         _backend = backend;
-        Id = "good-search.search"; Title = "Good Search"; Name = "Search";
+        Id = "not-bad-search.search"; Title = "Not Bad Search"; Name = "Search";
         Icon = new IconInfo("\uE721"); PlaceholderText = "Search indexed files…"; ShowDetails = true;
         EmptyContent = new CommandItem(new NoOpCommand()) { Title = "Type to search", Subtitle = "The Rust IPC backend must be running." };
     }
@@ -66,7 +66,7 @@ internal sealed partial class SearchPage : DynamicListPage, IDisposable
                 Volatile.Write(ref _items, []);
                 EmptyContent = new CommandItem(new AnonymousCommand(() => UpdateSearchText(query, query))
                     { Name = "Retry", Result = CommandResult.KeepOpen() })
-                    { Title = "Good Search backend unavailable", Subtitle = ex.Message };
+                    { Title = "Not Bad Search backend unavailable", Subtitle = ex.Message };
                 IsLoading = false;
                 RaiseItemsChanged();
             });

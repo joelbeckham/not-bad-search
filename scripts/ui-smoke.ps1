@@ -1,4 +1,4 @@
-param([string]$Exe = "$PSScriptRoot\..\target\release\good-search.exe")
+param([string]$Exe = "$PSScriptRoot\..\target\release\not-bad-search.exe")
 $ErrorActionPreference = 'Stop'
 Add-Type @'
 using System;
@@ -8,7 +8,7 @@ public class NativeProbe {
  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb,IntPtr param);
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint pid);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd,System.Text.StringBuilder text,int count);
- public static IntPtr OwnedWindow(uint pid) {IntPtr found=IntPtr.Zero;EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);if(owner==pid){var s=new System.Text.StringBuilder(256);GetWindowText(h,s,256);if(s.ToString()=="Good Search" && IsWindowVisible(h))found=h;}return true;},IntPtr.Zero);return found;}
+ public static IntPtr OwnedWindow(uint pid) {IntPtr found=IntPtr.Zero;EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);if(owner==pid){var s=new System.Text.StringBuilder(256);GetWindowText(h,s,256);if(s.ToString()=="Not Bad Search" && IsWindowVisible(h))found=h;}return true;},IntPtr.Zero);return found;}
  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string cls,string title);
  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -30,8 +30,8 @@ exclusions = ['*.tmp']
 semantic_enabled = false
 reconcile_seconds = 30
 "@ | Set-Content -LiteralPath "$data\config.toml"
-$env:GOOD_SEARCH_DATA=$data
-$env:GOOD_SEARCH_TRACE='1'
+$env:NOT_BAD_SEARCH_DATA=$data
+$env:NOT_BAD_SEARCH_TRACE='1'
 $proc=Start-Process -FilePath $Exe -PassThru
 try {
  $deadline=[DateTime]::UtcNow.AddSeconds(20)
@@ -84,5 +84,5 @@ try {
  [pscustomobject]@{HotkeySamplesMs=$times;TypingToResultMs=$searchMs;NativeRenameToResultMs=$changeMs;WorkingSetMiB=$proc.WorkingSet64/1MB;PrivateMiB=$proc.PrivateMemorySize64/1MB;VisibleIdleCpuOneCorePercent=$visiblePercent;HiddenIdleCpuOneCorePercent=100*($proc.TotalProcessorTime.TotalSeconds-$cpu)/$timer.Elapsed.TotalSeconds;Fixture=$base} | ConvertTo-Json
 } finally {
  if (-not $proc.HasExited) {Stop-Process -Id $proc.Id}
- Remove-Item Env:\GOOD_SEARCH_DATA,Env:\GOOD_SEARCH_TRACE -ErrorAction SilentlyContinue
+ Remove-Item Env:\NOT_BAD_SEARCH_DATA,Env:\NOT_BAD_SEARCH_TRACE -ErrorAction SilentlyContinue
 }

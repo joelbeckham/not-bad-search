@@ -2,10 +2,10 @@ param([string]$Distro='Ubuntu-24.04')
 $ErrorActionPreference='Stop'
 $repo=[IO.Path]::GetFullPath("$PSScriptRoot\..")
 $id=[guid]::NewGuid().ToString('N')
-$linux="/tmp/good-search-probe-$id"
+$linux="/tmp/not-bad-search-probe-$id"
 & wsl -d $Distro -- mkdir -p $linux
 if ($LASTEXITCODE -ne 0) {throw 'Could not create WSL fixture'}
-$root="\\wsl.localhost\$Distro\tmp\good-search-probe-$id"
+$root="\\wsl.localhost\$Distro\tmp\not-bad-search-probe-$id"
 $log="$repo\test-data\wsl-watch-$id.log"
 $proc=Start-Process -FilePath "$repo\target\release\diagnostics.exe" -ArgumentList @('watch',$root) -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru -WindowStyle Hidden
 Start-Sleep -Seconds 2

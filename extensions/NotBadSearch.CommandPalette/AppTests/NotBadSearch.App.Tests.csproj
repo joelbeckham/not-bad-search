@@ -5,5 +5,5 @@
   <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
   <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
  </PropertyGroup>
- <ItemGroup><ProjectReference Include="..\App\GoodSearch.CommandPalette.csproj" /></ItemGroup>
+ <ItemGroup><ProjectReference Include="..\App\NotBadSearch.CommandPalette.csproj" /></ItemGroup>
 </Project>

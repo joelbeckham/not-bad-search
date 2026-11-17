@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace GoodSearch.Core;
+namespace NotBadSearch.Core;
 
 public static class PreviewMarkdown
 {

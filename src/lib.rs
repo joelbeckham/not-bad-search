@@ -151,7 +151,7 @@ pub struct Hit {
     pub snippet: Option<String>,
 }
 impl Hit {
-    pub fn open_label(&self) -> &str { if self.notion { "Open in Notion" } else if self.path.starts_with("good-search://gmail/") { "Open in Gmail" } else if self.slack { "Open in Slack" } else if self.original_url.is_some() { "Open in Jira" } else { "Open file" } }
+    pub fn open_label(&self) -> &str { if self.notion { "Open in Notion" } else if self.path.starts_with("not-bad-search://gmail/") { "Open in Gmail" } else if self.slack { "Open in Slack" } else if self.original_url.is_some() { "Open in Jira" } else { "Open file" } }
     pub fn location(&self) -> &str {
         self.original_url.as_deref().unwrap_or(&self.path)
     }
@@ -162,7 +162,7 @@ pub(crate) fn remote_locations(db: &Connection, hits: &mut [Hit]) -> Result<()> 
     }
     for hit in hits
         .iter_mut()
-        .filter(|h| h.path.starts_with("good-search://"))
+        .filter(|h| h.path.starts_with("not-bad-search://"))
     {
         hit.original_url=Some(db.query_row("SELECT original_url FROM remote_items r JOIN files f ON f.id=r.file_id WHERE f.path=?1",[&hit.path],|r|r.get(0))?);
     }
@@ -172,11 +172,11 @@ pub(crate) fn remote_locations(db: &Connection, hits: &mut [Hit]) -> Result<()> 
     for hit in hits.iter_mut().filter(|h| h.original_url.is_some()) {
         hit.notion = db.query_row("SELECT r.content_format='notion' FROM files f LEFT JOIN attachments a ON a.file_id=f.id JOIN remote_items r ON r.file_id=coalesce(a.parent_file_id,f.id) WHERE f.path=?1",[&hit.path],|r|r.get(0))?;
         hit.slack = db.query_row("SELECT r.content_format='slack' FROM files f LEFT JOIN attachments a ON a.file_id=f.id JOIN remote_items r ON r.file_id=coalesce(a.parent_file_id,f.id) WHERE f.path=?1",[&hit.path],|r|r.get(0))?;
-        if hit.path.starts_with("good-search://gmail/") { hit.gmail = gmail::metadata(db, &hit.path)?; }
+        if hit.path.starts_with("not-bad-search://gmail/") { hit.gmail = gmail::metadata(db, &hit.path)?; }
         if hit.slack {
             hit.slack_replies=db.query_row("SELECT max(0,json_array_length(r.raw_content,'$.messages')-1) FROM files f LEFT JOIN attachments a ON a.file_id=f.id JOIN remote_items r ON r.file_id=coalesce(a.parent_file_id,f.id) WHERE f.path=?1",[&hit.path],|r|r.get(0))?;
         }
-        if !hit.slack && !hit.notion && !hit.path.starts_with("good-search://gmail/") { hit.jira = jira::metadata(db, &hit.path)?; }
+        if !hit.slack && !hit.notion && !hit.path.starts_with("not-bad-search://gmail/") { hit.jira = jira::metadata(db, &hit.path)?; }
     }
     Ok(())
 }
@@ -239,7 +239,7 @@ pub fn search_filtered(
     filters.push(format!(
         "(?{root_param}='null' OR f.root IN (SELECT value FROM json_each(?{root_param})))"
     ));
-    let image = "(f.path NOT LIKE 'good-search://%' AND (EXISTS(SELECT 1 FROM attachments a WHERE a.file_id=f.id) OR EXISTS(SELECT 1 FROM documents d WHERE d.file_id=f.id AND d.kind IN ('image_text','image_description')) OR lower(f.name) GLOB '*.png' OR lower(f.name) GLOB '*.jpg' OR lower(f.name) GLOB '*.jpeg' OR lower(f.name) GLOB '*.webp' OR lower(f.name) GLOB '*.gif' OR lower(f.name) GLOB '*.bmp' OR lower(f.name) GLOB '*.tif' OR lower(f.name) GLOB '*.tiff' OR lower(f.name) GLOB '*.svg' OR lower(f.name) GLOB '*.avif'))";
+    let image = "(f.path NOT LIKE 'not-bad-search://%' AND (EXISTS(SELECT 1 FROM attachments a WHERE a.file_id=f.id) OR EXISTS(SELECT 1 FROM documents d WHERE d.file_id=f.id AND d.kind IN ('image_text','image_description')) OR lower(f.name) GLOB '*.png' OR lower(f.name) GLOB '*.jpg' OR lower(f.name) GLOB '*.jpeg' OR lower(f.name) GLOB '*.webp' OR lower(f.name) GLOB '*.gif' OR lower(f.name) GLOB '*.bmp' OR lower(f.name) GLOB '*.tif' OR lower(f.name) GLOB '*.tiff' OR lower(f.name) GLOB '*.svg' OR lower(f.name) GLOB '*.avif'))";
     if !options.images {
         filters.push(format!("NOT {image}"));
     }

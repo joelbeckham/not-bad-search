@@ -138,14 +138,14 @@ impl App {
                         !self.settings && self.inspector.is_none() && self.preview.is_none();
                     if self.settings {
                         let response = ui.add(egui::Button::new("").min_size(Vec2::new(28., 28.)).frame(false))
-                            .on_hover_text("Shut down Good Search");
-                        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Shut down Good Search"));
+                            .on_hover_text("Shut down Not Bad Search");
+                        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Shut down Not Bad Search"));
                         let center = response.rect.center();
                         let stroke = egui::Stroke::new(1.7, MUTED);
                         ui.painter().line_segment([center + Vec2::new(-5., -5.), center + Vec2::new(5., 5.)], stroke);
                         ui.painter().line_segment([center + Vec2::new(-5., 5.), center + Vec2::new(5., -5.)], stroke);
                         let text_response = ui.add(
-                            egui::Button::new(RichText::new("Shut down Good Search").size(12.).color(MUTED))
+                            egui::Button::new(RichText::new("Shut down Not Bad Search").size(12.).color(MUTED))
                                 .frame(false),
                         );
                         if response.clicked() || text_response.clicked() {
@@ -304,16 +304,16 @@ impl App {
                                 rect.min + Vec2::new(14., 18.),
                                 Vec2::splat(22.),
                             );
-                            let (uri, bytes) = if hit.path.starts_with("good-search://notion/") {good_search::file_icons::notion_icon()} else if hit.path.starts_with("good-search://gmail/") {
-                                good_search::file_icons::gmail_icon()
-                            } else if hit.path.starts_with("good-search://slack/") {
-                                good_search::file_icons::slack_icon()
-                            } else if hit.path.starts_with("good-search://jira/") {
-                                good_search::file_icons::jira_icon()
+                            let (uri, bytes) = if hit.path.starts_with("not-bad-search://notion/") {not_bad_search::file_icons::notion_icon()} else if hit.path.starts_with("not-bad-search://gmail/") {
+                                not_bad_search::file_icons::gmail_icon()
+                            } else if hit.path.starts_with("not-bad-search://slack/") {
+                                not_bad_search::file_icons::slack_icon()
+                            } else if hit.path.starts_with("not-bad-search://jira/") {
+                                not_bad_search::file_icons::jira_icon()
                             } else {
-                                good_search::file_icons::icon(if hit.original_url.is_some() { &hit.path } else { &hit.name })
+                                not_bad_search::file_icons::icon(if hit.original_url.is_some() { &hit.path } else { &hit.name })
                             };
-                            if hit.original_url.is_some() && !hit.path.starts_with("good-search://") {
+                            if hit.original_url.is_some() && !hit.path.starts_with("not-bad-search://") {
                                 let thumbnail=std::path::Path::new(&hit.path).with_extension("thumb.png");
                                 egui::Image::new(format!("file:///{}",thumbnail.to_string_lossy())).paint_at(ui,icon);
                             } else {egui::Image::from_bytes(uri, bytes).paint_at(ui, icon);}
@@ -321,7 +321,7 @@ impl App {
                                 .extension()
                                 .and_then(|s| s.to_str())
                                 .unwrap_or("file");
-                            let ext: String = if hit.notion {"NOTION".into()} else if hit.path.starts_with("good-search://gmail/") { "GMAIL".into() } else if hit.slack { "SLACK".into() } else if hit.original_url.is_some() { "JIRA".into() } else {
+                            let ext: String = if hit.notion {"NOTION".into()} else if hit.path.starts_with("not-bad-search://gmail/") { "GMAIL".into() } else if hit.slack { "SLACK".into() } else if hit.original_url.is_some() { "JIRA".into() } else {
                                 ext.chars().take(8).collect::<String>().to_uppercase() };
                             let text_rect = egui::Rect::from_min_max(
                                 rect.min + Vec2::new(48., 8.),

@@ -17,7 +17,7 @@
     <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.2.0" />
     <PackageReference Include="Shmuelie.WinRTServer" Version="2.1.1" />
     <PackageReference Include="Microsoft.Windows.SDK.Contracts" Version="10.0.28000.2957" ExcludeAssets="all" PrivateAssets="all" />
-    <ProjectReference Include="..\Core\GoodSearch.Core.csproj" />
+    <ProjectReference Include="..\Core\NotBadSearch.Core.csproj" />
     <None Update="Package.appxmanifest" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

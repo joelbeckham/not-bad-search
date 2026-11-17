@@ -1,5 +1,5 @@
 use anyhow::Result;
-use good_search::{
+use not_bad_search::{
     gmail::{self, Provider, Settings},
     jira::Outcome,
 };
@@ -27,7 +27,7 @@ fn thread(body: &str) -> Value {
 }
 #[test]
 fn resume_atomic_pages_and_update_conversations() -> Result<()> {
-    let mut db = good_search::open_db(std::path::Path::new(":memory:"))?;
+    let mut db = not_bad_search::open_db(std::path::Path::new(":memory:"))?;
     let settings = Settings::default();
     let mut fake = Fake(VecDeque::from([
         (
@@ -63,7 +63,7 @@ fn resume_atomic_pages_and_update_conversations() -> Result<()> {
     assert!(
         text.contains("First message") && text.contains("newneedle") && !text.contains("oldneedle")
     );
-    let hits = good_search::search(&db, "Release", 10)?;
+    let hits = not_bad_search::search(&db, "Release", 10)?;
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].open_label(), "Open in Gmail");
     assert!(hits[0].jira.is_none());
@@ -72,14 +72,14 @@ fn resume_atomic_pages_and_update_conversations() -> Result<()> {
         Some(chrono::DateTime::parse_from_rfc3339("2026-11-07T12:00:00Z")?.timestamp())
     );
     assert_eq!(
-        good_search::jira::open_target(&db, &hits[0].path)?,
+        not_bad_search::jira::open_target(&db, &hits[0].path)?,
         hits[0].location()
     );
     Ok(())
 }
 #[test]
 fn incomplete_conversation_does_not_advance_or_publish() -> Result<()> {
-    let mut db = good_search::open_db(std::path::Path::new(":memory:"))?;
+    let mut db = not_bad_search::open_db(std::path::Path::new(":memory:"))?;
     let mut incomplete = thread("x");
     incomplete["messageCount"] = json!(3);
     let mut fake = Fake(VecDeque::from([
@@ -100,13 +100,13 @@ fn incomplete_conversation_does_not_advance_or_publish() -> Result<()> {
 }
 #[test]
 fn new_source_is_paused_and_config_roundtrips() -> Result<()> {
-    let source = good_search::sources::Source::gmail_source();
+    let source = not_bad_search::sources::Source::gmail_source();
     assert!(source.paused);
     assert!(!source.images);
     assert!(source.root().starts_with("gmail:"));
     source.gmail.as_ref().unwrap().validate()?;
     let encoded = toml::to_string(&source)?;
-    let restored: good_search::sources::Source = toml::from_str(&encoded)?;
+    let restored: not_bad_search::sources::Source = toml::from_str(&encoded)?;
     assert_eq!(source.root(), restored.root());
     Ok(())
 }

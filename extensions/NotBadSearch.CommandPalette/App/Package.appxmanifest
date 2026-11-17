@@ -5,22 +5,22 @@
  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
  IgnorableNamespaces="uap uap3 com rescap">
- <Identity Name="GoodSearch.CommandPalette" Publisher="CN=GoodSearch" Version="0.1.0.0" />
- <Properties><DisplayName>Good Search</DisplayName><PublisherDisplayName>Good Search</PublisherDisplayName><Logo>Assets\StoreLogo.png</Logo></Properties>
+ <Identity Name="NotBadSearch.CommandPalette" Publisher="CN=NotBadSearch" Version="0.1.0.0" />
+ <Properties><DisplayName>Not Bad Search</DisplayName><PublisherDisplayName>Not Bad Search</PublisherDisplayName><Logo>Assets\StoreLogo.png</Logo></Properties>
  <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" /></Dependencies>
  <Resources><Resource Language="en-us" /></Resources>
  <Applications>
-  <Application Id="App" Executable="GoodSearch.CommandPalette.exe" EntryPoint="Windows.FullTrustApplication">
-   <uap:VisualElements DisplayName="Good Search" Description="Search files through the Good Search Rust backend"
+  <Application Id="App" Executable="NotBadSearch.CommandPalette.exe" EntryPoint="Windows.FullTrustApplication">
+   <uap:VisualElements DisplayName="Not Bad Search" Description="Search files through the Not Bad Search Rust backend"
     BackgroundColor="transparent" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" />
    <Extensions>
     <com:Extension Category="windows.comServer"><com:ComServer>
-     <com:ExeServer Executable="GoodSearch.CommandPalette.exe" Arguments="-RegisterProcessAsComServer" DisplayName="Good Search">
-      <com:Class Id="304E55FC-AE41-4D23-8237-67116778812B" DisplayName="Good Search" />
+     <com:ExeServer Executable="NotBadSearch.CommandPalette.exe" Arguments="-RegisterProcessAsComServer" DisplayName="Not Bad Search">
+      <com:Class Id="304E55FC-AE41-4D23-8237-67116778812B" DisplayName="Not Bad Search" />
      </com:ExeServer>
     </com:ComServer></com:Extension>
     <uap3:Extension Category="windows.appExtension">
-     <uap3:AppExtension Name="com.microsoft.commandpalette" Id="GoodSearch" PublicFolder="Public" DisplayName="Good Search" Description="Good Search file search and previews">
+     <uap3:AppExtension Name="com.microsoft.commandpalette" Id="NotBadSearch" PublicFolder="Public" DisplayName="Not Bad Search" Description="Not Bad Search file search and previews">
       <uap3:Properties><CmdPalProvider>
        <Activation><CreateInstance ClassId="304E55FC-AE41-4D23-8237-67116778812B" /></Activation>
        <SupportedInterfaces><Commands /></SupportedInterfaces>

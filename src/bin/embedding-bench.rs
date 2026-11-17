@@ -44,7 +44,7 @@ fn main() -> Result<()> {
         times[500], times[950], times[990]
     );
     if let Some(database) = std::env::args().nth(2) {
-        use good_search::{
+        use not_bad_search::{
             open_db, open_reader,
             semantic::{self, LocalModel, VectorIndex},
         };

@@ -212,7 +212,7 @@ impl VectorIndex {
                         "image_text" => "image text",
                         _ => "text",
                     };
-                    let excerpt=if path.starts_with("good-search://slack/") {body.split_once("Conversation passage:\n").map_or(body.as_str(),|(_,passage)|passage)}else{body.as_str()};
+                    let excerpt=if path.starts_with("not-bad-search://slack/") {body.split_once("Conversation passage:\n").map_or(body.as_str(),|(_,passage)|passage)}else{body.as_str()};
                     let snippet=format!("Semantic {kind}: {}",excerpt.chars().take(180).collect::<String>().replace(['\n','\r']," "));
                     hits.push(Hit {
                         original_url: None,

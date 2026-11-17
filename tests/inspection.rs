@@ -1,5 +1,5 @@
 use anyhow::Result;
-use good_search::{inspection::inspect, open_db, open_reader};
+use not_bad_search::{inspection::inspect, open_db, open_reader};
 
 #[test]
 fn complete_read_only_snapshot_and_missing_file() -> Result<()> {

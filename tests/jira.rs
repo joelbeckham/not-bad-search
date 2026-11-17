@@ -1,5 +1,5 @@
 use anyhow::{bail, Result};
-use good_search::{
+use not_bad_search::{
     jira::{self, Outcome, Provider, Settings},
     open_db,
 };
@@ -26,7 +26,7 @@ fn metadata_refreshes_without_replacing_content_and_reaches_attachments() -> Res
     ticket["fields"]["labels"] = json!(["customer"]);
     let mut fake = Fake::new(vec![Some(page(vec![ticket.clone()], None))]);
     jira::sync(&mut db, "source", &Settings::default(), &mut fake, || false)?;
-    let hits = good_search::search(&db, "needle", 10)?;
+    let hits = not_bad_search::search(&db, "needle", 10)?;
     let metadata = hits[0].jira.as_ref().unwrap();
     assert_eq!(metadata.status, "In Review");
     assert_eq!(metadata.category, "indeterminate");
@@ -44,7 +44,7 @@ fn metadata_refreshes_without_replacing_content_and_reaches_attachments() -> Res
     ticket["fields"]["updated"] = json!("2026-10-02T12:00:00Z");
     fake.pages.push_back(Some(page(vec![ticket], None)));
     jira::sync(&mut db, "source", &Settings::default(), &mut fake, || false)?;
-    let hits = good_search::search(&db, "attachment", 10)?;
+    let hits = not_bad_search::search(&db, "attachment", 10)?;
     let metadata = hits[0].jira.as_ref().unwrap();
     assert_eq!(metadata.status, "Resolved");
     assert_eq!(metadata.category, "done");
@@ -76,7 +76,7 @@ fn mixed_page_formats_resolve_per_issue_and_refresh_unchanged_items() -> Result<
     let mut fake=Fake::new(vec![Some(normalized.clone())]);fake.detail=Some(detail);
     jira::sync(&mut db,"source",&Settings::default(),&mut fake,||false)?;
     assert_eq!(fake.detail_calls,1);
-    for query in ["markdownneedle","htmlneedle","resolvedneedle"] {assert_eq!(good_search::search(&db,query,10)?.len(),1);}
+    for query in ["markdownneedle","htmlneedle","resolvedneedle"] {assert_eq!(not_bad_search::search(&db,query,10)?.len(),1);}
     fake.pages.push_back(Some(normalized));
     jira::sync(&mut db,"source",&Settings::default(),&mut fake,||false)?;
     assert_eq!(fake.detail_calls,2);
@@ -99,15 +99,15 @@ fn markdown_html_reload_and_chunk_replacement() -> Result<()> {
     settings.reload_generation+=1;
     fake.pages.push_back(Some(page(vec![first],None)));
     jira::sync(&mut db,"source",&settings,&mut fake,||false)?;
-    assert!(good_search::search(&db,"oldword",10)?.is_empty());
-    assert_eq!(good_search::search(&db,"needle",10)?.len(),1);
+    assert!(not_bad_search::search(&db,"oldword",10)?.is_empty());
+    assert_eq!(not_bad_search::search(&db,"needle",10)?.len(),1);
     assert_eq!(db.query_row("SELECT content_format FROM remote_items",[],|r|r.get::<_,String>(0))?,"markdown");
     let mut fallback=issue("1","","2026-10-01T12:00:00Z");
     fallback["fields"]["description"]=json!("<p>htmlneedle &amp; text</p>");
     fallback["appliedContentFormat"]=json!("html");
     fake.pages.push_back(Some(page(vec![fallback],None)));
     jira::sync(&mut db,"source",&settings,&mut fake,||false)?;
-    assert_eq!(good_search::search(&db,"htmlneedle",10)?.len(),1);
+    assert_eq!(not_bad_search::search(&db,"htmlneedle",10)?.len(),1);
     assert_eq!(db.query_row("SELECT content_format FROM remote_items",[],|r|r.get::<_,String>(0))?,"html");
     assert!(!db.query_row("SELECT searchable_text FROM remote_items",[],|r|r.get::<_,String>(0))?.contains("<p>"));
     assert_eq!(db.query_row("SELECT count(*) FROM remote_items",[],|r|r.get::<_,i64>(0))?,1);
@@ -116,7 +116,7 @@ fn markdown_html_reload_and_chunk_replacement() -> Result<()> {
 
 #[test]
 fn attachment_search_preview_pause_and_parent_removal() -> Result<()> {
-    use good_search::{images, Config, SearchFilters};
+    use not_bad_search::{images, Config, SearchFilters};
     let dir=tempfile::tempdir()?;
     let path=dir.path().join("image.png");
     image::RgbImage::from_pixel(8,8,image::Rgb([1,2,3])).save(&path)?;
@@ -127,23 +127,23 @@ fn attachment_search_preview_pause_and_parent_removal() -> Result<()> {
     db.execute("INSERT INTO files(root,path,name,folded) VALUES('jira:source',?1,'screenshot · CORE-1','screenshot · core-1')",[path.to_string_lossy()])?;
     let file=db.last_insert_rowid();
     db.execute("INSERT INTO attachments VALUES(?1,?2,'jira','source','123','screenshot.png','image/png',1,'hash','now')",rusqlite::params![file,parent])?;
-    let mut source=good_search::sources::Source::jira_source();source.id="source".into();source.paused=false;
+    let mut source=not_bad_search::sources::Source::jira_source();source.id="source".into();source.paused=false;
     let mut config=Config{sources:vec![source],..Default::default()};
     images::discover(&mut db,&config)?;
     struct Extract;
     impl images::Extractor for Extract {fn extract(&self,_:&str,_:&str,_:&[u8])->Result<images::Extraction>{Ok(images::Extraction{extracted_text:"screenshot needle".into(),description:"diagram".into()})}}
     assert!(images::process_one(&mut db,&Extract,||config.clone())?);
     let filters=SearchFilters{text:false,roots:Some(vec!["jira:source".into()]),..Default::default()};
-    let hits=good_search::search_filtered(&db,"screenshot",10,filters)?;
+    let hits=not_bad_search::search_filtered(&db,"screenshot",10,filters)?;
     assert_eq!(hits.len(),1);
     assert_eq!(hits[0].original_url.as_deref(),Some("https://bombbomb.atlassian.net/browse/CORE-1"));
     assert_eq!(jira::open_target(&db,&hits[0].path)?,hits[0].original_url.clone().unwrap());
-    assert!(matches!(good_search::preview::load(&path,"")?,good_search::preview::Content::Image{..}));
+    assert!(matches!(not_bad_search::preview::load(&path,"")?,not_bad_search::preview::Content::Image{..}));
     config.sources[0].paused=true;
     assert!(!images::process_one(&mut db,&Extract,||config.clone())?);
-    assert_eq!(good_search::search(&db,"needle",10)?.len(),1);
+    assert_eq!(not_bad_search::search(&db,"needle",10)?.len(),1);
     db.execute("DELETE FROM files WHERE id=?1",[parent])?;
-    assert!(good_search::search(&db,"needle",10)?.is_empty());
+    assert!(not_bad_search::search(&db,"needle",10)?.is_empty());
     assert_eq!(db.query_row("SELECT count(*) FROM files",[],|r|r.get::<_,i64>(0))?,0);
     Ok(())
 }
@@ -207,7 +207,7 @@ fn page_failure_resume_checkpoint_and_duplicate_edit_invalidation() -> Result<()
         "2026-10-02T12:00:00.000Z"
     );
     let chunk: i64 = db.query_row("SELECT min(id) FROM chunks", [], |r| r.get(0))?;
-    db.execute("INSERT INTO embeddings(chunk_id,model,content_hash,dimensions,vector) SELECT id,?1,content_hash,256,zeroblob(1024) FROM chunks",[good_search::semantic::MODEL])?;
+    db.execute("INSERT INTO embeddings(chunk_id,model,content_hash,dimensions,vector) SELECT id,?1,content_hash,256,zeroblob(1024) FROM chunks",[not_bad_search::semantic::MODEL])?;
     fake.pages.push_back(Some(page(vec![a], None)));
     jira::sync(&mut db, "source", &settings, &mut fake, || false)?;
     assert_eq!(
@@ -227,14 +227,14 @@ fn page_failure_resume_checkpoint_and_duplicate_edit_invalidation() -> Result<()
         )?,
         0
     );
-    assert!(good_search::search(&db, "marmalade", 10)?.is_empty());
-    let hits = good_search::search(&db, "blueberry", 10)?;
+    assert!(not_bad_search::search(&db, "marmalade", 10)?.is_empty());
+    let hits = not_bad_search::search(&db, "blueberry", 10)?;
     assert_eq!(hits.len(), 1);
     assert_eq!(
         jira::open_target(&db, &hits[0].path)?,
         "https://bombbomb.atlassian.net/browse/CORE-1"
     );
-    let inspected = good_search::inspection::inspect(&mut db, &hits[0].path)?;
+    let inspected = not_bad_search::inspection::inspect(&mut db, &hits[0].path)?;
     assert!(inspected["remote_item"][0]["raw_content"]
         .as_str()
         .unwrap()
@@ -242,7 +242,7 @@ fn page_failure_resume_checkpoint_and_duplicate_edit_invalidation() -> Result<()
     // An empty incremental response and local folder reconciliation never delete remote issues.
     fake.pages.push_back(Some(page(vec![], None)));
     jira::sync(&mut db, "source", &settings, &mut fake, || false)?;
-    good_search::reconcile(&mut db, &Default::default())?;
+    not_bad_search::reconcile(&mut db, &Default::default())?;
     assert_eq!(
         db.query_row("SELECT count(*) FROM remote_items", [], |r| r
             .get::<_, i64>(0))?,
@@ -294,7 +294,7 @@ fn malformed_pagination_and_detail_failures_do_not_commit_checkpoint() -> Result
 #[test]
 fn adf_structure_links_unsupported_nodes_and_timezones() -> Result<()> {
     let raw = json!({"type":"doc","content":[{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Title"}]},{"type":"paragraph","content":[{"type":"text","text":"Link","marks":[{"type":"link","attrs":{"href":"https://example.com/a"}}]},{"type":"hardBreak"},{"type":"text","text":"Next line"}]},{"type":"table","content":[{"type":"tableRow","content":[{"type":"tableCell","content":[{"type":"text","text":"Cell"}]}]}]},{"type":"media","attrs":{"id":"123"}}]});
-    let extracted = good_search::adf::extract(&raw)?;
+    let extracted = not_bad_search::adf::extract(&raw)?;
     assert!(extracted.text.contains("## Title\n"));
     assert!(extracted
         .text
@@ -319,7 +319,7 @@ fn adf_structure_links_unsupported_nodes_and_timezones() -> Result<()> {
 }
 #[test]
 fn mcp_allowlist_and_response_envelopes() -> Result<()> {
-    use good_search::bifrost::*;
+    use not_bad_search::bifrost::*;
     assert!(allowed_name("mcp__bifrost__jira_getJiraIssue").is_some());
     assert!(allowed_name("jira-getJiraIssue").is_some());
     assert!(allowed_name("jira_service_user-getJiraIssue").is_none());
@@ -404,7 +404,7 @@ fn streamable_http_discovery_session_and_read_call() -> Result<()> {
         }
         Ok(())
     });
-    let mut client = good_search::bifrost::Mcp::connect(good_search::bifrost::Connection {
+    let mut client = not_bad_search::bifrost::Mcp::connect(not_bad_search::bifrost::Connection {
         endpoint: format!("http://{address}/mcp"),
         api_key: "fixture-key".into(),
     })?;

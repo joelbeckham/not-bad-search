@@ -1,10 +1,10 @@
-# Rust backend handoff: Good Search Command Palette IPC v1
+# Rust backend handoff: Not Bad Search Command Palette IPC v1
 
 The extension uses IPC exclusively. It does not open SQLite, scan folders, or read preview file contents. No Rust code is changed by the extension project.
 
 ## Transport
 
-- Windows local named pipe: `\\.\pipe\good-search-v1` (client config contains just `good-search-v1`).
+- Windows local named pipe: `\\.\pipe\not-bad-search-v1` (client config contains just `not-bad-search-v1`).
 - Byte mode; UTF-8 without BOM; each message is one JSON object followed by LF. JSON string newlines must be escaped. CRLF responses are accepted.
 - One request and one response per connection. The client closes after receiving the response. Handle multiple simultaneous connections (search plus up to two previews); never hold a global index/write lock while waiting for pipe I/O.
 - Every request has integer `version: 1` and an opaque string `id`. Echo both in responses. Unknown fields should be ignored for forward compatibility.
@@ -48,7 +48,7 @@ Text response (plain text, not Markdown):
 Image response (optional):
 
 ```json
-{"version":1,"id":"preview-1","ok":true,"result":{"kind":"image","image_path":"C:\\Users\\you\\AppData\\Local\\GoodSearch\\previews\\thumbnail.png"}}
+{"version":1,"id":"preview-1","ok":true,"result":{"kind":"image","image_path":"C:\\Users\\you\\AppData\\Local\\NotBadSearch\\previews\\thumbnail.png"}}
 ```
 
 Supply a bounded local thumbnail (recommended <= 1024 px, < 5 MB), not an HTTP URL. Command Palette loads this image path itself. Keep generated thumbnails alive for the palette session. Backend should only return images the user authorized through configured roots or a backend-owned preview cache.

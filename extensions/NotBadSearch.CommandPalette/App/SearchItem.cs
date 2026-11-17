@@ -1,9 +1,9 @@
 using System.Diagnostics;
-using GoodSearch.Core;
+using NotBadSearch.Core;
 using Microsoft.CommandPalette.Extensions;
 using Microsoft.CommandPalette.Extensions.Toolkit;
 
-namespace GoodSearch.CommandPalette;
+namespace NotBadSearch.CommandPalette;
 
 internal sealed partial class SearchItem : ListItem
 {

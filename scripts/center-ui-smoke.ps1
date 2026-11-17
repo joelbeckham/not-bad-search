@@ -1,4 +1,4 @@
-param([string]$Exe = "$PSScriptRoot\..\target\release\good-search.exe")
+param([string]$Exe = "$PSScriptRoot\..\target\release\not-bad-search.exe")
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type @'
@@ -9,7 +9,7 @@ public class NativeProbe {
  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb,IntPtr param);
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint pid);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd,System.Text.StringBuilder text,int count);
- public static IntPtr OwnedWindow(uint pid) {IntPtr found=IntPtr.Zero;EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);if(owner==pid){var s=new System.Text.StringBuilder(256);GetWindowText(h,s,256);if(s.ToString()=="Good Search" && IsWindowVisible(h))found=h;}return true;},IntPtr.Zero);return found;}
+ public static IntPtr OwnedWindow(uint pid) {IntPtr found=IntPtr.Zero;EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);if(owner==pid){var s=new System.Text.StringBuilder(256);GetWindowText(h,s,256);if(s.ToString()=="Not Bad Search" && IsWindowVisible(h))found=h;}return true;},IntPtr.Zero);return found;}
  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string cls,string title);
  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int command);
  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
@@ -44,7 +44,7 @@ $base=[IO.Path]::GetFullPath("$PSScriptRoot\..\test-data\center-$([guid]::NewGui
 $data=Join-Path $base 'data';$files=Join-Path $base 'files'
 New-Item -ItemType Directory -Path $data,$files | Out-Null
 @("folders = ['$files']",'semantic_enabled = false','reconcile_seconds = 300')|Set-Content "$data\config.toml"
-$old=$env:GOOD_SEARCH_DATA;$env:GOOD_SEARCH_DATA=$data;$env:GOOD_SEARCH_TRACE='1';$env:GOOD_SEARCH_WORKER_TRACE='1'
+$old=$env:NOT_BAD_SEARCH_DATA;$env:NOT_BAD_SEARCH_DATA=$data;$env:NOT_BAD_SEARCH_TRACE='1';$env:NOT_BAD_SEARCH_WORKER_TRACE='1'
 $proc=Start-Process -FilePath $Exe -PassThru
 function Check-Center([string]$stage){
  Start-Sleep -Milliseconds 1500
@@ -80,4 +80,4 @@ try {
  if(-not $second.WaitForExit(5000)){Stop-Process -Id $second.Id;throw 'Second instance did not exit'}
  Check-Center 'Second launch'
  Write-Output 'CENTERING PASS'
-}finally{if(-not $proc.HasExited){Stop-Process -Id $proc.Id};$env:GOOD_SEARCH_DATA=$old}
+}finally{if(-not $proc.HasExited){Stop-Process -Id $proc.Id};$env:NOT_BAD_SEARCH_DATA=$old}

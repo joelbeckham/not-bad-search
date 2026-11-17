@@ -1,6 +1,6 @@
 param([string]$Exe="")
 $ErrorActionPreference='Stop'
-if(-not $Exe){$Exe=Join-Path $PSScriptRoot '..\target\release\good-search.exe'}
+if(-not $Exe){$Exe=Join-Path $PSScriptRoot '..\target\release\not-bad-search.exe'}
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 Add-Type @'
 using System;using System.Runtime.InteropServices;
@@ -19,7 +19,7 @@ public class DesignProbe {
  [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
  [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);
- public static IntPtr Find(uint id){IntPtr found=IntPtr.Zero;EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);if(owner==id){var s=new System.Text.StringBuilder(256);GetWindowText(h,s,256);if(s.ToString()=="Good Search" && IsWindowVisible(h))found=h;}return true;},IntPtr.Zero);return found;}
+ public static IntPtr Find(uint id){IntPtr found=IntPtr.Zero;EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);if(owner==id){var s=new System.Text.StringBuilder(256);GetWindowText(h,s,256);if(s.ToString()=="Not Bad Search" && IsWindowVisible(h))found=h;}return true;},IntPtr.Zero);return found;}
  public static void Click(IntPtr h,int x,int y){Rect r;GetWindowRect(h,out r);double scale=GetDpiForWindow(h)/96.0;SetCursorPos(r.L+(int)(x*scale),r.T+(int)(y*scale));System.Threading.Thread.Sleep(100);mouse_event(2,0,0,0,UIntPtr.Zero);System.Threading.Thread.Sleep(80);mouse_event(4,0,0,0,UIntPtr.Zero);}
 }
 '@
@@ -34,8 +34,8 @@ Copy-Item "$PSScriptRoot\..\test-data\embedding-model\*" -Destination $model
 [IO.File]::WriteAllText("$files\meeting.md",'Meeting notes about database performance and query optimization')
 [IO.File]::WriteAllText("$files\dessert.md",'A recipe for chocolate cake and vanilla frosting')
 @("folders = ['$files']","content_folders = ['$files']",'semantic_enabled = true','semantic_delay_ms = 500','image_daily_requests = 0','reconcile_seconds = 300') | Set-Content "$data\config.toml"
-$old=$env:GOOD_SEARCH_DATA;$oldTrace=$env:GOOD_SEARCH_TRACE;$oldWorker=$env:GOOD_SEARCH_WORKER_TRACE
-$env:GOOD_SEARCH_DATA=$data;$env:GOOD_SEARCH_TRACE='1';$env:GOOD_SEARCH_WORKER_TRACE='1'
+$old=$env:NOT_BAD_SEARCH_DATA;$oldTrace=$env:NOT_BAD_SEARCH_TRACE;$oldWorker=$env:NOT_BAD_SEARCH_WORKER_TRACE
+$env:NOT_BAD_SEARCH_DATA=$data;$env:NOT_BAD_SEARCH_TRACE='1';$env:NOT_BAD_SEARCH_WORKER_TRACE='1'
 $proc=Start-Process -FilePath $Exe -PassThru
 function Keys([string]$keys){
  if([DesignProbe]::GetForegroundWindow() -ne $script:h){throw 'Test lost focus; refusing input'}
@@ -85,5 +85,5 @@ try {
  Write-Output "PASS: three background refreshes without blanking; removed match cleared. Traces: $base"
 } finally {
  if(-not $proc.HasExited){Stop-Process -Id $proc.Id}
- $env:GOOD_SEARCH_DATA=$old;$env:GOOD_SEARCH_TRACE=$oldTrace;$env:GOOD_SEARCH_WORKER_TRACE=$oldWorker
+ $env:NOT_BAD_SEARCH_DATA=$old;$env:NOT_BAD_SEARCH_TRACE=$oldTrace;$env:NOT_BAD_SEARCH_WORKER_TRACE=$oldWorker
 }

@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace GoodSearch.Core;
+namespace NotBadSearch.Core;
 
 public sealed record SearchHit(string Path, string Name, Snippet[]? Snippets = null);
 public sealed record Snippet(int Line, string Text);

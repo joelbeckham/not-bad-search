@@ -1,6 +1,6 @@
 use crate::App;
 use eframe::egui::{self, Color32, RichText};
-use good_search::sources::{Source, Status};
+use not_bad_search::sources::{Source, Status};
 use std::{
     sync::mpsc,
     time::{Duration, Instant},
@@ -88,7 +88,7 @@ impl App {
             ui.label("Update cutoff: recheck the last");
             ui.add(egui::DragValue::new(&mut settings.update_lookback_days).range(1..=36500).suffix(" days"));
         });
-        if let Ok(cutoff)=good_search::slack::scan_start(settings,Some(chrono::Utc::now().timestamp()),chrono::Utc::now().timestamp()) {
+        if let Ok(cutoff)=not_bad_search::slack::scan_start(settings,Some(chrono::Utc::now().timestamp()),chrono::Utc::now().timestamp()) {
             if let Some(date)=chrono::DateTime::from_timestamp(cutoff,0) {
                 ui.weak(format!("Current update cutoff: {} UTC. Older indexed messages remain searchable.",date.format("%Y-%m-%d")));
             }
@@ -191,7 +191,7 @@ impl App {
         );
         ui.horizontal(|ui| {
             if ui.button("Store connection").clicked() {
-                let connection = good_search::bifrost::Connection {
+                let connection = not_bad_search::bifrost::Connection {
                     endpoint: self.source_settings.endpoint.trim().into(),
                     api_key: self.source_settings.api_key.trim().into(),
                 };
@@ -217,8 +217,8 @@ impl App {
                 let ctx = ui.ctx().clone();
                 std::thread::spawn(move || {
                     let result = (|| -> anyhow::Result<String> {
-                        let mut m = good_search::bifrost::Mcp::connect(
-                            good_search::bifrost::Connection::load()?,
+                        let mut m = not_bad_search::bifrost::Mcp::connect(
+                            not_bad_search::bifrost::Connection::load()?,
                         )?;
                         let user = m.call("jira_atlassianUserInfo", serde_json::json!({}))?;
                         Ok(format!(
@@ -234,7 +234,7 @@ impl App {
                 });
             }
             if ui.button("Remove connection").clicked() {
-                match good_search::credentials::remove_named("Bifrost/default") {
+                match not_bad_search::credentials::remove_named("Bifrost/default") {
                     Ok(()) => self.source_settings.connection_status = "Connection removed".into(),
                     Err(e) => self.source_settings.connection_status = e.to_string(),
                 }
@@ -287,8 +287,8 @@ impl App {
             std::thread::spawn(move || {
                 let result = (|| {
                     crate::platform::background_priority()?;
-                    let db = good_search::open_reader(&path)?;
-                    good_search::sources::snapshot(&db, &config)
+                    let db = not_bad_search::open_reader(&path)?;
+                    not_bad_search::sources::snapshot(&db, &config)
                 })();
                 let _ = tx.send(result.map_err(|e: anyhow::Error| e.to_string()));
                 ctx.request_repaint();
@@ -368,9 +368,9 @@ impl App {
                 self.source_settings.selected = None;
                 return;
             };
-            if self.config.sources[index].kind == good_search::sources::SourceKind::Notion { self.draw_notion_source(ui,index); return; }
-            if self.config.sources[index].kind == good_search::sources::SourceKind::Gmail { self.draw_gmail_source(ui,index); return; }
-            if self.config.sources[index].kind == good_search::sources::SourceKind::Slack {
+            if self.config.sources[index].kind == not_bad_search::sources::SourceKind::Notion { self.draw_notion_source(ui,index); return; }
+            if self.config.sources[index].kind == not_bad_search::sources::SourceKind::Gmail { self.draw_gmail_source(ui,index); return; }
+            if self.config.sources[index].kind == not_bad_search::sources::SourceKind::Slack {
                 self.draw_slack_source(ui,index); return;
             }
             if !self.config.sources[index].is_folder() {
@@ -447,11 +447,11 @@ impl App {
                     std::thread::spawn(move || {
                         let result=(|| -> anyhow::Result<_> {
                             crate::platform::background_priority()?;
-                            let db=good_search::open_writer(&path)?;
+                            let db=not_bad_search::open_writer(&path)?;
                             db.execute("UPDATE image_jobs SET state='pending',attempts=0,retry_at=0,detail='' WHERE state='failed' AND file_id IN (SELECT id FROM files WHERE root=?1)",[root.to_string_lossy().as_ref()])?;
                             let _=wake.try_send(false);
-                            let reader=good_search::open_reader(&path)?;
-                            good_search::sources::snapshot(&reader,&config)
+                            let reader=not_bad_search::open_reader(&path)?;
+                            not_bad_search::sources::snapshot(&reader,&config)
                         })();
                         let _=tx.send(result.map_err(|e|e.to_string()));ctx.request_repaint();
                     });
@@ -511,11 +511,11 @@ impl App {
                     ui.horizontal(|ui| {
 
                         let (uri,bytes)=match source.kind {
-                            good_search::sources::SourceKind::Folder=>good_search::file_icons::folder_icon(),
-                            good_search::sources::SourceKind::Jira=>good_search::file_icons::jira_icon(),
-                            good_search::sources::SourceKind::Slack=>good_search::file_icons::slack_icon(),
-                            good_search::sources::SourceKind::Gmail=>good_search::file_icons::gmail_icon(),
-                            good_search::sources::SourceKind::Notion=>good_search::file_icons::notion_icon(),
+                            not_bad_search::sources::SourceKind::Folder=>not_bad_search::file_icons::folder_icon(),
+                            not_bad_search::sources::SourceKind::Jira=>not_bad_search::file_icons::jira_icon(),
+                            not_bad_search::sources::SourceKind::Slack=>not_bad_search::file_icons::slack_icon(),
+                            not_bad_search::sources::SourceKind::Gmail=>not_bad_search::file_icons::gmail_icon(),
+                            not_bad_search::sources::SourceKind::Notion=>not_bad_search::file_icons::notion_icon(),
                         };
                         ui.add(egui::Image::from_bytes(uri,bytes).fit_to_exact_size(egui::vec2(22.,22.))).on_hover_text(source.label());
                         let title=RichText::new(&source.name).size(17.);
@@ -616,14 +616,14 @@ impl App {
             ui.label("Image analysis model");
             egui::ComboBox::from_id_salt("image_analysis_model")
                 .selected_text(match self.config.image_model.as_str() {
-                    good_search::DEFAULT_IMAGE_MODEL => "GPT-6.1 Terra (default)",
+                    not_bad_search::DEFAULT_IMAGE_MODEL => "GPT-6.1 Terra (default)",
                     "gpt-6-luna" => "GPT-6 Luna",
                     _ => "Choose a model",
                 })
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
                         &mut self.config.image_model,
-                        good_search::DEFAULT_IMAGE_MODEL.into(),
+                        not_bad_search::DEFAULT_IMAGE_MODEL.into(),
                         "GPT-6.1 Terra (default)",
                     );
                     ui.selectable_value(
@@ -655,7 +655,7 @@ impl App {
         );
         ui.horizontal(|ui| {
             if ui.button("Store key").clicked() {
-                match good_search::credentials::save(&self.api_key_input) {
+                match not_bad_search::credentials::save(&self.api_key_input) {
                     Ok(()) => {
                         self.api_key_input.clear();
                         self.key_saved = true;
@@ -665,7 +665,7 @@ impl App {
                 }
             }
             if ui.button("Remove key").clicked() {
-                match good_search::credentials::remove() {
+                match not_bad_search::credentials::remove() {
                     Ok(()) => self.key_saved = false,
                     Err(e) => self.error = e.to_string(),
                 }

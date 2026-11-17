@@ -1,6 +1,6 @@
 use crate::{Config, Event};
 use eframe::egui;
-use good_search::semantic::{self, LocalModel, VectorIndex};
+use not_bad_search::semantic::{self, LocalModel, VectorIndex};
 use std::{
     collections::VecDeque,
     path::PathBuf,
@@ -9,11 +9,11 @@ use std::{
 };
 
 pub(super) struct Worker {
-    pending: Arc<Mutex<Option<(u64, String, good_search::SearchFilters)>>>,
+    pending: Arc<Mutex<Option<(u64, String, not_bad_search::SearchFilters)>>>,
     wake: mpsc::SyncSender<()>,
 }
 impl Worker {
-    pub fn request(&self, id: u64, query: String, filters: good_search::SearchFilters) {
+    pub fn request(&self, id: u64, query: String, filters: not_bad_search::SearchFilters) {
         *self.pending.lock().unwrap() = Some((id, query, filters));
         self.wake();
     }
@@ -30,7 +30,7 @@ impl Worker {
         ctx: egui::Context,
     ) -> Self {
         let pending = Arc::new(Mutex::new(
-            None::<(u64, String, good_search::SearchFilters)>,
+            None::<(u64, String, not_bad_search::SearchFilters)>,
         ));
         let work = pending.clone();
         let (wake, rx) = mpsc::sync_channel(1);
@@ -41,8 +41,8 @@ impl Worker {
             };
             let run = || -> anyhow::Result<()> {
                 crate::platform::background_priority()?;
-                let mut writer = good_search::open_writer(&path)?;
-                let reader = good_search::open_reader(&path)?;
+                let mut writer = not_bad_search::open_writer(&path)?;
+                let reader = not_bad_search::open_reader(&path)?;
                 let folder = path
                     .parent()
                     .unwrap()

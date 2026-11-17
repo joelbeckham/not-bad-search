@@ -1,10 +1,10 @@
 using System.IO.Pipes;
 using System.Text.Json;
 
-namespace GoodSearch.Core;
+namespace NotBadSearch.Core;
 
 // Per-call connections isolate cancellation and concurrent searches/previews.
-public sealed class PipeBackend(string pipeName = "good-search-v1", TimeSpan? timeout = null) : ISearchBackend
+public sealed class PipeBackend(string pipeName = "not-bad-search-v1", TimeSpan? timeout = null) : ISearchBackend
 {
     public const int MaxFrameBytes = 1_048_576;
     private readonly TimeSpan _timeout = timeout ?? TimeSpan.FromSeconds(5);
@@ -51,10 +51,10 @@ public sealed class PipeBackend(string pipeName = "good-search-v1", TimeSpan? ti
                 ?? throw new BackendException("Backend returned an empty result.");
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
-        { throw new BackendException("Good Search backend did not respond within the timeout. Start the Rust IPC backend and try again."); }
+        { throw new BackendException("Not Bad Search backend did not respond within the timeout. Start the Rust IPC backend and try again."); }
         catch (JsonException)
         { throw new BackendException("Backend returned invalid JSON or an incompatible response."); }
         catch (IOException ex)
-        { throw new BackendException($"Cannot communicate with Good Search: {ex.Message}"); }
+        { throw new BackendException($"Cannot communicate with Not Bad Search: {ex.Message}"); }
     }
 }

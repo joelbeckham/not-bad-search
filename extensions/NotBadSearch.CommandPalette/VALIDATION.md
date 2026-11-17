@@ -11,4 +11,4 @@ Performed on Windows x64 using project-local .NET SDK 10.0.403.
 
 Not yet verified: actual Command Palette package registration/discovery and visual rendering, interaction with the real Rust IPC backend, ARM64 build/runtime, signed MSIX distribution. The Rust IPC backend does not exist in the inspected source; until it implements IPC-CONTRACT.md, searches display the unavailable-backend state.
 
-All authored project changes are under `extensions/GoodSearch.CommandPalette`. No Rust source or Cargo files were edited, and no SQLite database was read by this extension or its tests.
+All authored project changes are under `extensions/NotBadSearch.CommandPalette`. No Rust source or Cargo files were edited, and no SQLite database was read by this extension or its tests.

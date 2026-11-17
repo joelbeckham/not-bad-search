@@ -1,7 +1,7 @@
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
-using GoodSearch.Core;
+using NotBadSearch.Core;
 
 static void Assert(bool value, string message) { if (!value) throw new Exception(message); }
 static async Task Throws<T>(Func<Task> action) where T : Exception
@@ -11,7 +11,7 @@ static async Task Throws<T>(Func<Task> action) where T : Exception
 }
 static async Task Exchange(Func<JsonElement, byte[]> response, Func<PipeBackend, Task> verify, bool fragmented = false)
 {
-    var name = "good-search-test-" + Guid.NewGuid().ToString("N");
+    var name = "not-bad-search-test-" + Guid.NewGuid().ToString("N");
     using var server = new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
     var serving = Task.Run(async () =>
@@ -69,7 +69,7 @@ await Exchange(r => Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { versio
 await Exchange(_ => Enumerable.Repeat((byte)'x', PipeBackend.MaxFrameBytes + 1).Append((byte)10).ToArray(), c => Throws<BackendException>(async () => await c.SearchAsync("x", default)));
 Console.WriteLine("PASS mismatched IDs/versions, malformed JSON, premature EOF, errors, size limits");
 
-var absent = "good-search-absent-" + Guid.NewGuid().ToString("N");
+var absent = "not-bad-search-absent-" + Guid.NewGuid().ToString("N");
 await Throws<BackendException>(async () => await new PipeBackend(absent, TimeSpan.FromMilliseconds(150)).SearchAsync("x", default));
 using (var cancel = new CancellationTokenSource(100))
     await Throws<OperationCanceledException>(async () => await new PipeBackend(absent).SearchAsync("x", cancel.Token));

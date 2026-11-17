@@ -518,7 +518,7 @@ fn publish(
     images: &[Cached],
     index_images: bool,
 ) -> Result<()> {
-    let uri = format!("good-search://notion/{source}/{id}");
+    let uri = format!("not-bad-search://notion/{source}/{id}");
     let root = format!("notion:{source}");
     let hash = blake3::hash(p.text.as_bytes()).to_hex().to_string();
     db.execute("INSERT INTO files(root,path,name,folded) VALUES(?1,?2,?3,?4) ON CONFLICT(path) DO UPDATE SET name=excluded.name,folded=excluded.folded",params![root,uri,p.title,p.title.to_lowercase()])?;

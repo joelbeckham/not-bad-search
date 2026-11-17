@@ -1,6 +1,6 @@
 use crate::{Config, Event};
 use eframe::egui;
-use good_search::{
+use not_bad_search::{
     bifrost::{Connection, Mcp},
     jira::{self, Outcome},
 };
@@ -20,7 +20,7 @@ pub(super) fn start(
     std::thread::spawn(move || {
         let run = || -> anyhow::Result<()> {
             crate::platform::background_priority()?;
-            let mut db = good_search::open_writer(&path)?;
+            let mut db = not_bad_search::open_writer(&path)?;
             db.execute("UPDATE remote_sync SET retry_at=0,failures=0 WHERE error LIKE '%Unsupported Jira description format: mixed%'",[])?;
             let mut manual = false;
             let mut last_cache_cleanup=std::time::Instant::now();
@@ -37,7 +37,7 @@ pub(super) fn start(
                 db.execute("DELETE FROM remote_sync WHERE source_id NOT IN (SELECT value FROM json_each(?1))",[serde_json::to_string(&ids)?])?;
                 db.execute("DELETE FROM remote_failures WHERE source_id NOT IN (SELECT value FROM json_each(?1))",[serde_json::to_string(&ids)?])?;
                 if last_cache_cleanup.elapsed()>=Duration::from_secs(3600) {
-                    good_search::attachments::prune_cache(&db,&path.parent().unwrap().join("attachments"))?;
+                    not_bad_search::attachments::prune_cache(&db,&path.parent().unwrap().join("attachments"))?;
                     last_cache_cleanup=std::time::Instant::now();
                 }
                 for source in current
@@ -71,14 +71,14 @@ pub(super) fn start(
                             })
                     };
                     let result = (|| -> anyhow::Result<Outcome> {
-                        if let Some(settings)=&source.notion { let mut client=Mcp::connect_discovery(Connection::load()?)?; let outcome=good_search::notion::sync(&mut db,&source.id,settings,&mut client,&path.parent().unwrap().join("attachments"),source.images,cancel); good_search::images::discover(&mut db,&config.lock().unwrap().clone())?; return outcome; }
-                        if let Some(settings)=&source.gmail { let mut client=Mcp::connect_discovery(Connection::load()?)?; return good_search::gmail::sync(&mut db,&source.id,settings,&mut client,cancel); }
+                        if let Some(settings)=&source.notion { let mut client=Mcp::connect_discovery(Connection::load()?)?; let outcome=not_bad_search::notion::sync(&mut db,&source.id,settings,&mut client,&path.parent().unwrap().join("attachments"),source.images,cancel); not_bad_search::images::discover(&mut db,&config.lock().unwrap().clone())?; return outcome; }
+                        if let Some(settings)=&source.gmail { let mut client=Mcp::connect_discovery(Connection::load()?)?; return not_bad_search::gmail::sync(&mut db,&source.id,settings,&mut client,cancel); }
                         if let Some(settings) = &source.slack {
                             let mut client = Mcp::connect_discovery(Connection::load()?)?;
-                            let outcome=good_search::slack::sync(&mut db,&source.id,settings,&mut client,cancel)?;
+                            let outcome=not_bad_search::slack::sync(&mut db,&source.id,settings,&mut client,cancel)?;
                             if source.images && !cancel() {
-                                good_search::slack::sync_images(&mut db,&source.id,&mut client,&path.parent().unwrap().join("attachments"),cancel)?;
-                                good_search::images::discover(&mut db,&config.lock().unwrap().clone())?;
+                                not_bad_search::slack::sync_images(&mut db,&source.id,&mut client,&path.parent().unwrap().join("attachments"),cancel)?;
+                                not_bad_search::images::discover(&mut db,&config.lock().unwrap().clone())?;
                             }
                             return Ok(outcome);
                         }
@@ -89,8 +89,8 @@ pub(super) fn start(
                         }
                         let outcome=jira::sync(&mut db, &source.id, settings, &mut client, cancel)?;
                         if !cancel() {
-                            good_search::attachments::sync_jira(&mut db,&source.id,settings,&mut client,&path.parent().unwrap().join("attachments"),cancel)?;
-                            good_search::images::discover(&mut db,&config.lock().unwrap().clone())?;
+                            not_bad_search::attachments::sync_jira(&mut db,&source.id,settings,&mut client,&path.parent().unwrap().join("attachments"),cancel)?;
+                            not_bad_search::images::discover(&mut db,&config.lock().unwrap().clone())?;
                         }
                         Ok(outcome)
                     })();

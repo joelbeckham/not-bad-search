@@ -4,7 +4,7 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $dotnet = Join-Path $repo '.tools\dotnet\dotnet.exe'
 if (-not (Test-Path $dotnet)) { $dotnet = (Get-Command dotnet -ErrorAction Stop).Source }
 $destination = Join-Path $PSScriptRoot "AppPackages\$Architecture"
-& $dotnet publish (Join-Path $PSScriptRoot 'App\GoodSearch.CommandPalette.csproj') -c Release -r "win-$($Architecture.ToLowerInvariant())" -p:Platform=$Architecture --self-contained true -o $destination
+& $dotnet publish (Join-Path $PSScriptRoot 'App\NotBadSearch.CommandPalette.csproj') -c Release -r "win-$($Architecture.ToLowerInvariant())" -p:Platform=$Architecture --self-contained true -o $destination
 if ($LASTEXITCODE -ne 0) { throw 'Extension publish failed' }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'App\Package.appxmanifest') -Destination (Join-Path $destination 'AppxManifest.xml')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'THIRD-PARTY-NOTICES.md') -Destination $destination

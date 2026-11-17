@@ -1,6 +1,6 @@
 using System.Threading.Channels;
-using GoodSearch.CommandPalette;
-using GoodSearch.Core;
+using NotBadSearch.CommandPalette;
+using NotBadSearch.Core;
 
 static void Assert(bool value, string message) { if (!value) throw new Exception(message); }
 var backend = new ControlledBackend();
@@ -33,7 +33,7 @@ Assert(page.GetItems().Length == 0, "Late response cannot restore stale results"
 page.UpdateSearchText("", "broken");
 var broken = await backend.Calls.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
 broken.Result.SetException(new BackendException("test backend offline"));
-await WaitFor(() => page.EmptyContent?.Title == "Good Search backend unavailable" && !page.IsLoading);
+await WaitFor(() => page.EmptyContent?.Title == "Not Bad Search backend unavailable" && !page.IsLoading);
 Assert(page.EmptyContent!.Subtitle.Contains("test backend offline"), "Backend error visible");
 Console.WriteLine("PASS latest-query wins, cancellation, reentrant notifications, snippets, lazy previews, empty query, backend errors");
 

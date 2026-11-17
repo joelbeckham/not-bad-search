@@ -1,5 +1,5 @@
 use anyhow::Result;
-use good_search::{
+use not_bad_search::{
     images::{self, Extraction, Extractor},
     open_db, reconcile, search, Config,
 };

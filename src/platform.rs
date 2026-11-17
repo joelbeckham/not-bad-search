@@ -63,10 +63,10 @@ impl Instance {
             .fold(0xcbf29ce484222325u64, |h, b| {
                 (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
             });
-        let property: Vec<u16> = format!("GoodSearch.Window.{hash:016x}\0")
+        let property: Vec<u16> = format!("NotBadSearch.Window.{hash:016x}\0")
             .encode_utf16()
             .collect();
-        let name: Vec<u16> = format!("Local\\GoodSearch.Instance.{hash:016x}\0")
+        let name: Vec<u16> = format!("Local\\NotBadSearch.Instance.{hash:016x}\0")
             .encode_utf16()
             .collect();
         unsafe {
@@ -93,7 +93,7 @@ impl Instance {
                     }
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 }
-                bail!("Good Search is already starting. Please try opening it again shortly.");
+                bail!("Not Bad Search is already starting. Please try opening it again shortly.");
             }
             Ok(Some(Self { mutex, property }))
         }
@@ -163,7 +163,7 @@ impl Hotkey {
             let mut msg = std::mem::zeroed();
             while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
                 if msg.message == WM_HOTKEY {
-                    let debug_path = std::env::var_os("GOOD_SEARCH_DATA")
+                    let debug_path = std::env::var_os("NOT_BAD_SEARCH_DATA")
                         .map(|p| std::path::PathBuf::from(p).join("worker-trace.log"));
                     if let Some(path) = &debug_path {
                         crate::trace(path, "hotkey received");
@@ -201,7 +201,7 @@ impl Drop for Hotkey {
 }
 
 pub fn open_file(path: &str, database: &std::path::Path) -> Result<()> {
-    let target = good_search::jira::open_target(&good_search::open_reader(database)?, path)?;
+    let target = not_bad_search::jira::open_target(&not_bad_search::open_reader(database)?, path)?;
     let path = target.as_str();
     let wide: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
     let result = unsafe {

@@ -1,6 +1,6 @@
 use crate::App;
 use eframe::egui::{self, Color32, RichText};
-use good_search::{preview::Content, Hit};
+use not_bad_search::{preview::Content, Hit};
 use std::sync::{mpsc, Arc, Mutex};
 
 type Request = (u64, String, String, Option<String>);
@@ -27,13 +27,13 @@ impl Loader {
                 let request = work.lock().unwrap().take();
                 if let Some((id, path, query, channel)) = request {
                     let result = (|| -> anyhow::Result<Content> {
-                        if path.starts_with("good-search://") {
-                            let db=good_search::open_reader(&database)?;
+                        if path.starts_with("not-bad-search://") {
+                            let db=not_bad_search::open_reader(&database)?;
                             let (text,warnings):(String,String)=db.query_row("SELECT searchable_text,warnings FROM remote_items r JOIN files f ON f.id=r.file_id WHERE f.path=?1",[&path],|r|Ok((r.get(0)?,r.get(1)?)))?;
                             let text=if warnings!="[]"{format!("{text}\n\nIndexing notes: {warnings}")}else{text};
-                            let text=if path.starts_with("good-search://slack/") {good_search::slack_display::preview(&text,channel.as_deref())} else {text};
-                            Ok(good_search::preview::text_preview(&text,&query,false))
-                        }else {good_search::preview::load(std::path::Path::new(&path), &query)}
+                            let text=if path.starts_with("not-bad-search://slack/") {not_bad_search::slack_display::preview(&text,channel.as_deref())} else {text};
+                            Ok(not_bad_search::preview::text_preview(&text,&query,false))
+                        }else {not_bad_search::preview::load(std::path::Path::new(&path), &query)}
                     })()
                         .map_err(|e| format!("{e:#}"));
                     *output.lock().unwrap() = Some((id, result));
@@ -83,7 +83,7 @@ impl App {
         let loader = self.preview_loader.get_or_insert_with(|| {
             Loader::new(ctx.clone(), self.config_path.with_file_name("index.sqlite"))
         });
-        let request = loader.request(hit.path.clone(), self.query.clone(), good_search::slack_display::channel_name(hit,&self.config.sources));
+        let request = loader.request(hit.path.clone(), self.query.clone(), not_bad_search::slack_display::channel_name(hit,&self.config.sources));
         self.preview = Some(Preview {
             items: self.hits.clone(),
             selected: self.selected,
@@ -145,7 +145,7 @@ impl App {
         });
         let hit = &preview.items[preview.selected];
         if previous != preview.selected {
-            preview.request = loader.request(hit.path.clone(), self.query.clone(), good_search::slack_display::channel_name(hit,&self.config.sources));
+            preview.request = loader.request(hit.path.clone(), self.query.clone(), not_bad_search::slack_display::channel_name(hit,&self.config.sources));
             preview.content = None;
             preview.texture = None;
             preview.initial_scroll = true;
@@ -362,7 +362,7 @@ pub(super) fn jira_summary(ui: &mut egui::Ui, hit: &Hit, expanded: bool) {
     let Some(info) = &hit.jira else { return; };
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 5.;
-        if !hit.path.starts_with("good-search://") { ui.weak("Ticket:"); }
+        if !hit.path.starts_with("not-bad-search://") { ui.weak("Ticket:"); }
         ui.hyperlink_to(&info.key, hit.location());
         let color = match info.category.as_str() {
             "done" => Color32::from_rgb(100, 205, 140),

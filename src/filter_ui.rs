@@ -1,6 +1,6 @@
 use crate::App;
 use eframe::egui;
-use good_search::filters::SourceSelection;
+use not_bad_search::filters::SourceSelection;
 
 fn multiselect(ui: &mut egui::Ui, id: &str, label: String, contents: impl FnOnce(&mut egui::Ui)) {
     ui.push_id(id, |ui| {
@@ -56,7 +56,7 @@ impl App {
                 };
             }
             ui.separator();
-            for (kind, label) in [(good_search::sources::SourceKind::Folder, "Folders"), (good_search::sources::SourceKind::Jira, "Jira"), (good_search::sources::SourceKind::Slack, "Slack"), (good_search::sources::SourceKind::Gmail, "Gmail"), (good_search::sources::SourceKind::Notion, "Notion")] {
+            for (kind, label) in [(not_bad_search::sources::SourceKind::Folder, "Folders"), (not_bad_search::sources::SourceKind::Jira, "Jira"), (not_bad_search::sources::SourceKind::Slack, "Slack"), (not_bad_search::sources::SourceKind::Gmail, "Gmail"), (not_bad_search::sources::SourceKind::Notion, "Notion")] {
                 let group: Vec<_> = sources.iter().filter(|s| s.kind == kind).collect();
                 if group.is_empty() {
                     continue;
@@ -152,7 +152,7 @@ impl App {
         egui::ComboBox::from_id_salt("result_sort")
             .selected_text(format!("Sort: {}", self.filters.sort.label()))
             .show_ui(ui, |ui| {
-                use good_search::sorting::SortMode;
+                use not_bad_search::sorting::SortMode;
                 for mode in [SortMode::PreferNewer, SortMode::NewestFirst, SortMode::OldestFirst] {
                     ui.selectable_value(&mut self.filters.sort,mode,mode.label());
                 }

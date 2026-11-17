@@ -193,7 +193,7 @@ fn conversation_chunks(text:&str,opening:&str)->Vec<crate::content::Chunk> {
 fn publish_conversation(db:&Connection,source:&str,s:&Settings,run:&str,scope:&str,messages:&[Message])->Result<()> {
     use rusqlite::OptionalExtension;
     let m=messages.first().context("Slack conversation has no opening message")?;
-    let uri=format!("good-search://slack/{source}/{}/{}",s.channel,m.ts);
+    let uri=format!("not-bad-search://slack/{source}/{}/{}",s.channel,m.ts);
     let title=format!("{} · {}",s.channel,m.body.lines().next().unwrap_or("Message").chars().take(120).collect::<String>());
     if messages.len()==1 {
         let owned:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM remote_items r,json_each(r.raw_content,'$.messages') j WHERE r.source_id=?1 AND r.content_format='slack' AND json_extract(r.raw_content,'$.ts')!=?2 AND json_extract(j.value,'$.ts')=?2)",params![source,m.ts],|r|r.get(0))?;
@@ -212,7 +212,7 @@ fn publish_conversation(db:&Connection,source:&str,s:&Settings,run:&str,scope:&s
     let file:i64=db.query_row("SELECT id FROM files WHERE path=?1",[uri],|r|r.get(0))?;
     // Replace legacy reply documents while preserving their cached images.
     for reply in messages.iter().skip(1) {
-        let path=format!("good-search://slack/{source}/{}/{}",s.channel,reply.ts);
+        let path=format!("not-bad-search://slack/{source}/{}/{}",s.channel,reply.ts);
         let old:Option<i64>=db.query_row("SELECT id FROM files WHERE path=?1",[path],|r|r.get(0)).optional()?;
         if let Some(old)=old {
             db.execute("DELETE FROM files WHERE id IN (SELECT file_id FROM attachments WHERE parent_file_id=?1 AND remote_id IN (SELECT remote_id FROM attachments WHERE parent_file_id=?2))",params![old,file])?;

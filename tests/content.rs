@@ -1,5 +1,5 @@
 use anyhow::Result;
-use good_search::{open_db, open_reader, reconcile, search, Config};
+use not_bad_search::{open_db, open_reader, reconcile, search, Config};
 use rusqlite::Connection;
 
 #[test]

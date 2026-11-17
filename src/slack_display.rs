@@ -1,4 +1,4 @@
-﻿//! Presentation only: keep original Slack text searchable and render cached results immediately.
+//! Presentation only: keep original Slack text searchable and render cached results immediately.
 use std::{collections::HashMap,sync::OnceLock};
 use crate::{Hit,sources::Source};
 /// Prefer the installed Windows color emoji font before broader system fallback.
@@ -53,13 +53,13 @@ pub fn channel_name(hit:&Hit,sources:&[Source])->Option<String> {
     if !hit.slack {return None;}
     sources.iter().find(|s| {
         if let Some(settings)=&s.slack {
-            hit.path.starts_with(&format!("good-search://slack/{}/",s.id)) || hit.original_url.as_deref().is_some_and(|url| url.starts_with(&format!("{}/archives/{}/",settings.workspace.trim_end_matches('/'),settings.channel)))
+            hit.path.starts_with(&format!("not-bad-search://slack/{}/",s.id)) || hit.original_url.as_deref().is_some_and(|url| url.starts_with(&format!("{}/archives/{}/",settings.workspace.trim_end_matches('/'),settings.channel)))
         } else {false}
     }).map(|s|format!("#{}",s.name.trim_start_matches('#')))
 }
 pub fn decorate(hit:&mut Hit,sources:&[Source]) {
     if !hit.slack {return;}
-    if hit.path.starts_with("good-search://slack/") {
+    if hit.path.starts_with("not-bad-search://slack/") {
         if let Some((_,body))=hit.name.split_once(" · ") {
             hit.name=match channel_name(hit,sources) {Some(name)=>format!("{name} · {body}"),None=>body.to_owned()};
         }

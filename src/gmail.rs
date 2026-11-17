@@ -238,7 +238,7 @@ fn publish(db: &Connection, source: &str, run: &str, scope: &str, t: &Value) -> 
         "Gmail conversation exceeds indexing size limit"
     );
     let hash = blake3::hash(text.as_bytes()).to_hex().to_string();
-    let uri = format!("good-search://gmail/{source}/{id}");
+    let uri = format!("not-bad-search://gmail/{source}/{id}");
     db.execute("INSERT INTO files(root,path,name,folded) VALUES(?1,?2,?3,?4) ON CONFLICT(path) DO UPDATE SET name=excluded.name,folded=excluded.folded",params![format!("gmail:{source}"),uri,title,title.to_lowercase()])?;
     let file: i64 = db.query_row("SELECT id FROM files WHERE path=?1", [uri], |r| r.get(0))?;
     let old: Option<String> = db

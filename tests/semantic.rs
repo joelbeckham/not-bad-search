@@ -1,5 +1,5 @@
 use anyhow::Result;
-use good_search::{
+use not_bad_search::{
     open_db, open_reader, open_writer,
     semantic::{self, Embedder, VectorIndex, DIMENSIONS},
     Hit,
@@ -10,7 +10,7 @@ struct Fake;
 
 #[test]
 fn mixed_sources_content_matching_and_empty_filters() -> Result<()> {
-    use good_search::{jira, search_filtered, SearchFilters};
+    use not_bad_search::{jira, search_filtered, SearchFilters};
     let mut db = open_db(std::path::Path::new(":memory:"))?;
     fixture(&db)?;
     db.execute_batch(
@@ -110,7 +110,7 @@ fn mixed_sources_content_matching_and_empty_filters() -> Result<()> {
 
 #[test]
 fn source_groups_dynamic_all_and_reset() {
-    use good_search::{filters::SourceSelection, sources::Source};
+    use not_bad_search::{filters::SourceSelection, sources::Source};
     let mut sources = vec![Source::folder("C:/notes".into()), Source::jira_source()];
     sources[0].paused = true;
     let mut selection = SourceSelection::default();
@@ -265,7 +265,7 @@ fn hybrid_ranking_protects_exact_names_quotes_and_deduplicates() {
 
 #[test]
 fn source_and_match_filters_apply_before_ranking() -> Result<()> {
-    use good_search::{search_filtered, SearchFilters};
+    use not_bad_search::{search_filtered, SearchFilters};
     let mut db = open_db(std::path::Path::new(":memory:"))?;
     fixture(&db)?;
     db.execute_batch(

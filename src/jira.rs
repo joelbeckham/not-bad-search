@@ -454,7 +454,7 @@ fn publish(db: &Connection, source: &str, s: &Settings, run: &str, item: &Item) 
         return Ok(());
     }
     let site_id = blake3::hash(s.site.as_bytes()).to_hex().to_string();
-    let uri = format!("good-search://jira/{source}/{site_id}/{}", item.id);
+    let uri = format!("not-bad-search://jira/{source}/{site_id}/{}", item.id);
     let root = format!("jira:{source}");
     let name = format!("{} · {}", item.key, item.title);
     db.execute("INSERT INTO files(root,path,name,folded) VALUES(?1,?2,?3,?4) ON CONFLICT(path) DO UPDATE SET name=excluded.name,folded=excluded.folded WHERE name!=excluded.name",params![root,uri,name,name.to_lowercase()])?;
@@ -493,7 +493,7 @@ pub fn record_error(db: &Connection, source: &str, error: &str) -> Result<()> {
     Ok(())
 }
 pub fn open_target(db: &Connection, path: &str) -> Result<String> {
-    if !path.starts_with("good-search://") {
+    if !path.starts_with("not-bad-search://") {
         let parent:Option<String>=db.query_row("SELECT r.original_url FROM attachments a JOIN files f ON f.id=a.file_id JOIN remote_items r ON r.file_id=a.parent_file_id WHERE f.path=?1",[path],|r|r.get(0)).optional()?;
         return Ok(parent.unwrap_or_else(||path.into()));
     }

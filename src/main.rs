@@ -9,7 +9,7 @@ mod semantic_worker;
 mod settings_ui;
 use anyhow::{Context, Result};
 use eframe::egui;
-use good_search::{
+use not_bad_search::{
     open_db, open_reader, open_writer, reconcile, search_filtered, Config, Hit, SearchFilters,
 };
 use notify::Watcher;
@@ -32,7 +32,7 @@ enum Event {
     RemoteStatus(String, bool),
 }
 fn trace(path: &std::path::Path, message: &str) {
-    if std::env::var_os("GOOD_SEARCH_WORKER_TRACE").is_some() {
+    if std::env::var_os("NOT_BAD_SEARCH_WORKER_TRACE").is_some() {
         use std::io::Write;
         if let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)
@@ -47,7 +47,7 @@ struct App {
     source_settings: settings_ui::State,
     remote_wake: mpsc::SyncSender<()>,
     filters: SearchFilters,
-    source_selection: good_search::filters::SourceSelection,
+    source_selection: not_bad_search::filters::SourceSelection,
     background_refresh: bool,
     semantic: semantic_worker::Worker,
     semantic_status: String,
@@ -102,14 +102,14 @@ fn start_image_worker(
         let run = || -> Result<()> {
             platform::background_priority()?;
             let mut db = open_writer(&path)?;
-            good_search::images::recover(&db)?;
-            let client = good_search::images::OpenAi::new()?;
+            not_bad_search::images::recover(&db)?;
+            let client = not_bad_search::images::OpenAi::new()?;
             let mut previous = String::new();
             loop {
                 let current = config.lock().unwrap().clone();
-                let key = good_search::credentials::load()?.is_some();
+                let key = not_bad_search::credentials::load()?.is_some();
                 let changed = if key {
-                    good_search::images::process_one(&mut db, &client, || {
+                    not_bad_search::images::process_one(&mut db, &client, || {
                         config.lock().unwrap().clone()
                     })?
                 } else {
@@ -122,7 +122,7 @@ fn start_image_worker(
                 } else {
                     ""
                 };
-                let status = format!("{prefix}{}", good_search::images::summary(&db)?);
+                let status = format!("{prefix}{}", not_bad_search::images::summary(&db)?);
                 if changed || status != previous {
                     previous = status.clone();
                     let _ = events.send(Event::ImageStatus(status, changed));
@@ -132,7 +132,7 @@ fn start_image_worker(
                     continue;
                 }
                 match rx.recv_timeout(Duration::from_secs(5)) {
-                    Ok(true) => good_search::images::retry_failed(&db)?,
+                    Ok(true) => not_bad_search::images::retry_failed(&db)?,
                     Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     _ => {}
                 }
@@ -154,7 +154,7 @@ fn main() {
     if let Err(e) = run() {
         // Also show startup failures in release builds without a console.
         let message: Vec<u16> = format!("{e:#}\0").encode_utf16().collect();
-        let title: Vec<u16> = "Good Search\0".encode_utf16().collect();
+        let title: Vec<u16> = "Not Bad Search\0".encode_utf16().collect();
         unsafe {
             windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
                 std::ptr::null_mut(),
@@ -166,10 +166,10 @@ fn main() {
     }
 }
 fn run() -> Result<()> {
-    let data = std::env::var_os("GOOD_SEARCH_DATA")
+    let data = std::env::var_os("NOT_BAD_SEARCH_DATA")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap_or_default()).join("GoodSearch")
+            PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap_or_default()).join("NotBadSearch")
         });
     if !data.is_absolute() || data.to_string_lossy().starts_with("\\\\") {
         anyhow::bail!("App data must be an absolute Windows-local path");
@@ -194,14 +194,14 @@ fn run() -> Result<()> {
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Glow,
         viewport: egui::ViewportBuilder::default()
-            .with_title("Good Search")
+            .with_title("Not Bad Search")
             .with_decorations(false)
             .with_transparent(true)
             .with_inner_size([1014., 650.])
             .with_min_inner_size([600., 360.]),
         ..Default::default()
     };
-    eframe::run_native("Good Search",options,Box::new(move |cc| {
+    eframe::run_native("Not Bad Search",options,Box::new(move |cc| {
         let mut fonts = egui::FontDefinitions::default();
         let mut dm_sans = egui::FontData::from_static(include_bytes!("../assets/fonts/DMSans.ttf"));
         dm_sans.tweak.coords.push(b"wght", 400.0);
@@ -210,7 +210,7 @@ fn run() -> Result<()> {
         let proportional = fonts.families.entry(egui::FontFamily::Proportional).or_default();
         proportional.insert(0, "DM Sans".into());
         fonts.families.entry(egui::FontFamily::Monospace).or_default().push("DM Sans".into());
-        good_search::slack_display::add_emoji_font(&mut fonts);
+        not_bad_search::slack_display::add_emoji_font(&mut fonts);
         cc.egui_ctx.set_fonts(fonts);
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         egui_extras::install_image_loaders(&cc.egui_ctx);
@@ -280,7 +280,7 @@ fn run() -> Result<()> {
         instance.attach(window)?;
         platform::center_window(window);
         let (hotkey,error)=match platform::Hotkey::register(cc.egui_ctx.clone(),window) {Ok(h)=>(Some(h),String::new()),Err(e)=>(None,e.to_string())};
-        Ok(Box::new(App {remote_wake,source_settings:settings_ui::State::default(),background_refresh:false,index_error:String::new(),filters:SearchFilters::default(),source_selection:Default::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:good_search::credentials::load().ok().flatten().is_some(),settings:config.sources.is_empty(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,selection_started:false,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
+        Ok(Box::new(App {remote_wake,source_settings:settings_ui::State::default(),background_refresh:false,index_error:String::new(),filters:SearchFilters::default(),source_selection:Default::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:not_bad_search::credentials::load().ok().flatten().is_some(),settings:config.sources.is_empty(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,selection_started:false,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
     })).map_err(|e|anyhow::anyhow!(e.to_string()))?;
     Ok(())
 }
@@ -314,9 +314,9 @@ impl App {
         self.background_refresh = !self.query.trim().is_empty();
     }
     fn publish_hits(&mut self, mut hits: Vec<Hit>) {
-        good_search::sorting::sort(&mut hits, &self.query, self.filters.sort, chrono::Utc::now().timestamp());
+        not_bad_search::sorting::sort(&mut hits, &self.query, self.filters.sort, chrono::Utc::now().timestamp());
         hits.truncate(100);
-        for hit in &mut hits { good_search::slack_display::decorate(hit,&self.config.sources); }
+        for hit in &mut hits { not_bad_search::slack_display::decorate(hit,&self.config.sources); }
         self.selected = updated_selection(&self.hits, &hits, self.selected, self.selection_started);
         self.hits = hits;
         self.background_refresh = false;
@@ -367,7 +367,7 @@ impl App {
         ) {
             self.searching = false;
             self.completed_generation = self.generation;
-            self.query_error = Some("Search worker stopped. Restart Good Search.".into());
+            self.query_error = Some("Search worker stopped. Restart Not Bad Search.".into());
         }
     }
     fn set_source_paused_now(&mut self,id:&str,paused:bool)->Result<()> {
@@ -444,7 +444,7 @@ impl eframe::App for App {
                     );
                     self.lexical_hits = hits.clone();
                     let next_hits = if let Some(semantic) = &self.semantic_hits {
-                        good_search::semantic::merge(&query, hits, semantic.clone(), usize::MAX)
+                        not_bad_search::semantic::merge(&query, hits, semantic.clone(), usize::MAX)
                     } else {
                         hits
                     };
@@ -534,7 +534,7 @@ impl eframe::App for App {
                             );
                             self.semantic_hits = Some(hits.clone());
                             if self.completed_generation == id {
-                                let hits = good_search::semantic::merge(
+                                let hits = not_bad_search::semantic::merge(
                                     &query,
                                     self.lexical_hits.clone(),
                                     hits,
@@ -605,7 +605,7 @@ impl eframe::App for App {
         if self.searching {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
-        if self.trace_results && std::env::var_os("GOOD_SEARCH_TRACE").is_some() {
+        if self.trace_results && std::env::var_os("NOT_BAD_SEARCH_TRACE").is_some() {
             use std::io::Write;
             if let Ok(mut f) = std::fs::OpenOptions::new()
                 .create(true)

@@ -1,10 +1,10 @@
 # Jira through Bifrost
 
-Good Search uses a deterministic MCP client for background imports. Searches, previews, inspection, embeddings and ranking use the Windows-local index; typing never calls Jira or Bifrost.
+Not Bad Search uses a deterministic MCP client for background imports. Searches, previews, inspection, embeddings and ranking use the Windows-local index; typing never calls Jira or Bifrost.
 
 ## Setup
 
-1. In Settings → Processing, enter the Bifrost MCP endpoint and API key, then **Store connection**. Both are stored in Windows Credential Manager under `GoodSearch/Bifrost/default`; neither is written to config.toml. **Test saved connection** discovers tools and checks the ordinary Jira account.
+1. In Settings → Processing, enter the Bifrost MCP endpoint and API key, then **Store connection**. Both are stored in Windows Credential Manager under `NotBadSearch/Bifrost/default`; neither is written to config.toml. **Test saved connection** discovers tools and checks the ordinary Jira account.
 2. In Sources, choose **Add Jira**. Defaults are site `https://bombbomb.atlassian.net`, cloud ID `bombbomb.atlassian.net`, and project `CORE` (project ID 10006). Start with a JQL expression such as `key in (CORE-123, CORE-456)` using real issue keys. Page size is a pagination setting, not an import limit.
 3. New sources start paused. Set the JQL, uncheck pause and save. Use **Sync enabled Jira sources now** for manual refresh; this operates on saved settings. Default background polling is five minutes.
 

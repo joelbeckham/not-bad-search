@@ -1,5 +1,5 @@
 use anyhow::Result;
-use good_search::{
+use not_bad_search::{
     open_db, reconcile,
     sources::{self, Source},
     Config,
@@ -20,11 +20,11 @@ fn image_queue_counts_are_disjoint_and_paused_sources_do_not_extract() -> Result
     let s=&stats[0];
     assert_eq!((s.items,s.ready,s.queued,s.processing,s.attention,s.skipped,s.images_ready),(5,1,1,1,1,1,1));
     struct Never;
-    impl good_search::images::Extractor for Never {
-        fn extract(&self,_:&str,_:&str,_:&[u8])->Result<good_search::images::Extraction>{panic!("Paused source must not upload")}
+    impl not_bad_search::images::Extractor for Never {
+        fn extract(&self,_:&str,_:&str,_:&[u8])->Result<not_bad_search::images::Extraction>{panic!("Paused source must not upload")}
     }
     config.sources[0].paused=true;
-    assert!(!good_search::images::process_one(&mut db,&Never,||config.clone())?);
+    assert!(!not_bad_search::images::process_one(&mut db,&Never,||config.clone())?);
     Ok(())
 }
 
@@ -93,7 +93,7 @@ fn source_exclusions_pause_resume_and_removal() -> Result<()> {
     std::fs::write(a.join("keep.md"), "updated")?;
     reconcile(&mut db, &config)?;
     assert_eq!(sources::snapshot(&db, &config)?[0].items, 1);
-    assert_eq!(good_search::search(&db, "hello", 10)?.len(), 2);
+    assert_eq!(not_bad_search::search(&db, "hello", 10)?.len(), 2);
     config.sources[0].paused = false;
     reconcile(&mut db, &config)?;
     assert_eq!(sources::snapshot(&db, &config)?[0].items, 2);
@@ -138,12 +138,12 @@ fn status_counts_items_once_and_respects_embedding_completion() -> Result<()> {
     config.semantic_enabled = false;
     assert_eq!(sources::snapshot(&db, &config)?[0].ready, 2);
     struct Never;
-    impl good_search::semantic::Embedder for Never {
+    impl not_bad_search::semantic::Embedder for Never {
         fn embed(&self, _: &[String]) -> Result<Vec<Vec<f32>>> {
             panic!("Paused source must not generate embeddings")
         }
     }
     config.sources[0].paused = true;
-    assert_eq!(good_search::semantic::index_batch_excluding(&mut db, &Never, 32, &config.paused_roots_json())?, 0);
+    assert_eq!(not_bad_search::semantic::index_batch_excluding(&mut db, &Never, 32, &config.paused_roots_json())?, 0);
     Ok(())
 }

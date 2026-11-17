@@ -1,5 +1,5 @@
 use anyhow::Result;
-use good_search::{
+use not_bad_search::{
     jira::Outcome,
     notion::{self, Provider, Settings},
 };
@@ -37,7 +37,7 @@ fn settings() -> Settings {
 #[test]
 fn nested_pages_images_resume_and_open_parent() -> Result<()> {
     let tmp = tempfile::tempdir()?;
-    let mut db = good_search::open_db(&tmp.path().join("index.sqlite"))?;
+    let mut db = not_bad_search::open_db(&tmp.path().join("index.sqlite"))?;
     let mut bytes = std::io::Cursor::new(Vec::new());
     image::DynamicImage::new_rgb8(4, 4).write_to(&mut bytes, image::ImageFormat::Png)?;
     let root=page(ROOT,&format!("root text\n<page url=\"https://www.notion.so/{CHILD}\">Child</page>\n<image source=\"notion-file-block://image\" />"));
@@ -86,7 +86,7 @@ fn nested_pages_images_resume_and_open_parent() -> Result<()> {
             .get::<_, i64>(0))?,
         2
     );
-    let hits = good_search::search(&db, "fixture", 10)?;
+    let hits = not_bad_search::search(&db, "fixture", 10)?;
     assert!(hits
         .iter()
         .all(|h| h.notion && h.open_label() == "Open in Notion" && h.jira.is_none()));
@@ -96,16 +96,16 @@ fn nested_pages_images_resume_and_open_parent() -> Result<()> {
         |r| r.get(0),
     )?;
     assert_eq!(
-        good_search::jira::open_target(&db, &attachment)?,
+        not_bad_search::jira::open_target(&db, &attachment)?,
         format!("https://www.notion.so/{ROOT}")
     );
-    let mut source = good_search::sources::Source::notion_source();
+    let mut source = not_bad_search::sources::Source::notion_source();
     source.id = "s".into();
     source.paused = false;
     source.notion = Some(settings());
-    good_search::images::discover(
+    not_bad_search::images::discover(
         &mut db,
-        &good_search::Config {
+        &not_bad_search::Config {
             sources: vec![source],
             ..Default::default()
         },
@@ -129,7 +129,7 @@ fn structure_ignores_links_and_code_and_keeps_database_children() -> Result<()> 
 #[test]
 fn capped_teamspace_search_splits_and_does_not_claim_completion() -> Result<()> {
     let tmp = tempfile::tempdir()?;
-    let mut db = good_search::open_db(&tmp.path().join("index.sqlite"))?;
+    let mut db = not_bad_search::open_db(&tmp.path().join("index.sqlite"))?;
     let s = Settings {
         teamspaces: ROOT.into(),
         ..Default::default()
@@ -154,7 +154,7 @@ fn capped_teamspace_search_splits_and_does_not_claim_completion() -> Result<()> 
 #[test]
 fn database_queries_resume_after_short_batches_without_search() -> Result<()> {
     let tmp = tempfile::tempdir()?;
-    let mut db = good_search::open_db(&tmp.path().join("index.sqlite"))?;
+    let mut db = not_bad_search::open_db(&tmp.path().join("index.sqlite"))?;
     let data = "collection://33333333-3333-3333-3333-333333333333";
     let root = json!({"metadata":{"type":"database"},"title":"Database","url":format!("https://www.notion.so/{ROOT}"),"text":format!("<database><data-source url=\"{data}\"></data-source></database>")});
     let child = format!("https://www.notion.so/{CHILD}");
@@ -237,7 +237,7 @@ fn database_query_uses_bound_keyset_and_rejects_stalled_rows() -> Result<()> {
 #[test]
 fn blank_database_rows_index_properties_and_do_not_stop_traversal() -> Result<()> {
     let tmp = tempfile::tempdir()?;
-    let mut db = good_search::open_db(&tmp.path().join("index.sqlite"))?;
+    let mut db = not_bad_search::open_db(&tmp.path().join("index.sqlite"))?;
     let blank = json!({"metadata":{"type":"page"},"title":"Postgres health","url":format!("https://www.notion.so/{ROOT}"),"text":r#"<page><properties>{" Details":"Query tuning guide","Discipline":"SRE","Concern":"🟡"}</properties><blank-page>This page is blank and has no content.</blank-page></page>"#});
     let parsed = notion::parse_page(&blank)?;
     assert!(parsed.text.contains("Details: Query tuning guide"));

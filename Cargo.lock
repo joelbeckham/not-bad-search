@@ -1257,7 +1257,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "good-search"
+name = "not-bad-search"
 version = "0.1.0"
 dependencies = [
  "anyhow",

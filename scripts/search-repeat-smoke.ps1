@@ -1,4 +1,4 @@
-param([string]$Exe = "$PSScriptRoot\..\target\release\good-search.exe",[int]$Rounds=20,[string]$Folder='',[switch]$Content)
+param([string]$Exe = "$PSScriptRoot\..\target\release\not-bad-search.exe",[int]$Rounds=20,[string]$Folder='',[switch]$Content)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type @'
@@ -20,7 +20,7 @@ public class SearchProbe {
  [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
  [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);
- public static IntPtr Find(uint id) {IntPtr result=IntPtr.Zero;EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);if(owner==id){var s=new System.Text.StringBuilder(256);GetWindowText(h,s,256);if(s.ToString()=="Good Search" && IsWindowVisible(h))result=h;}return true;},IntPtr.Zero);return result;}
+ public static IntPtr Find(uint id) {IntPtr result=IntPtr.Zero;EnumWindows((h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);if(owner==id){var s=new System.Text.StringBuilder(256);GetWindowText(h,s,256);if(s.ToString()=="Not Bad Search" && IsWindowVisible(h))result=h;}return true;},IntPtr.Zero);return result;}
  public static void Activate(IntPtr h) {Rect r;GetWindowRect(h,out r);double scale=GetDpiForWindow(h)/96.0;SetCursorPos(r.Left+(int)(120*scale),r.Top+(int)(36*scale));mouse_event(2,0,0,0,UIntPtr.Zero);mouse_event(4,0,0,0,UIntPtr.Zero);}
 }
 '@
@@ -44,8 +44,8 @@ content_folders = $contentRoots
 semantic_enabled = false
 reconcile_seconds = 30
 "@ | Set-Content "$data\config.toml"
-$oldData=$env:GOOD_SEARCH_DATA;$oldTrace=$env:GOOD_SEARCH_TRACE
-$env:GOOD_SEARCH_DATA=$data;$env:GOOD_SEARCH_TRACE='1'
+$oldData=$env:NOT_BAD_SEARCH_DATA;$oldTrace=$env:NOT_BAD_SEARCH_TRACE
+$env:NOT_BAD_SEARCH_DATA=$data;$env:NOT_BAD_SEARCH_TRACE='1'
 $proc=Start-Process -FilePath $Exe -PassThru
 function Send-TestKeys([string]$keys) {
  if([SearchProbe]::GetForegroundWindow() -ne $hwnd){throw 'Test window lost focus; refusing to type into another app'}
@@ -129,5 +129,5 @@ try {
  [pscustomobject]@{Rounds=$Rounds;MaxInputToResultMs=($times | Measure-Object -Maximum).Maximum;MeanInputToResultMs=($times | Measure-Object -Average).Average;SettledIdleCpuOneCorePercent=$idlePercent;HiddenIdleCpuOneCorePercent=$hiddenPercent;WorkingSetMiB=[math]::Round($proc.WorkingSet64/1MB,2);Content=[bool]$Content;Fixture=$base} | ConvertTo-Json
 } finally {
  if(-not $proc.HasExited){Stop-Process -Id $proc.Id}
- $env:GOOD_SEARCH_DATA=$oldData;$env:GOOD_SEARCH_TRACE=$oldTrace
+ $env:NOT_BAD_SEARCH_DATA=$oldData;$env:NOT_BAD_SEARCH_TRACE=$oldTrace
 }
