@@ -190,7 +190,7 @@ impl App {
         }
         if let Some(snippet) = &hit.snippet {
             ui.add(
-                egui::Label::new(RichText::new(snippet).color(Color32::from_rgb(120, 195, 204)))
+                egui::Label::new(RichText::new(snippet).color(crate::appearance::ACCENT))
                     .truncate(),
             )
             .on_hover_text(snippet);
@@ -290,7 +290,7 @@ impl App {
                         let mut job = egui::text::LayoutJob::default();
                         let normal = egui::TextFormat {
                             font_id: egui::FontId::monospace(13.),
-                            color: Color32::from_rgb(225, 228, 232),
+                            color: crate::appearance::TEXT,
                             ..Default::default()
                         };
                         job.append(
@@ -308,7 +308,7 @@ impl App {
                                 &line.text[range.clone()],
                                 0.,
                                 egui::TextFormat {
-                                    background: Color32::from_rgb(55, 88, 93),
+                                    background: crate::appearance::SELECTION_FILL,
                                     color: Color32::WHITE,
                                     ..normal.clone()
                                 },
@@ -365,8 +365,8 @@ pub(super) fn jira_summary(ui: &mut egui::Ui, hit: &Hit, expanded: bool) {
         if !hit.path.starts_with("not-bad-search://") { ui.weak("Ticket:"); }
         ui.hyperlink_to(&info.key, hit.location());
         let color = match info.category.as_str() {
-            "done" => Color32::from_rgb(100, 205, 140),
-            "indeterminate" => Color32::from_rgb(100, 175, 245),
+            "done" => crate::appearance::MUTED,
+            "indeterminate" => crate::appearance::ACCENT,
             _ => Color32::GRAY,
         };
         let (rect, response) = ui.allocate_exact_size(egui::vec2(14., 16.), egui::Sense::hover());

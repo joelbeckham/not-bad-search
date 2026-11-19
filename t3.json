@@ -1,0 +1,15 @@
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "scripts": [
+    {
+      "name": "Build prod release",
+      "command": ". .\\scripts\\env.ps1; cargo build --locked --release",
+      "icon": "build"
+    },
+    {
+      "name": "Run prod release",
+      "command": ".\\target\\release\\not-bad-search.exe",
+      "icon": "play"
+    }
+  ]
+}

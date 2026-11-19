@@ -3,23 +3,53 @@ use eframe::egui::{
     self, Align, Color32, FontId, Frame, Layout, Margin, RichText, Sense, Stroke, Vec2,
 };
 
-const BG: Color32 = Color32::from_rgb(22, 23, 25);
-const HEADER: Color32 = Color32::from_rgb(28, 29, 31);
-const LINE: Color32 = Color32::from_rgb(46, 48, 51);
-const TEXT: Color32 = Color32::from_rgb(235, 236, 238);
-const MUTED: Color32 = Color32::from_rgb(144, 148, 155);
-const ACCENT: Color32 = Color32::from_rgb(120, 195, 204);
+const BG: Color32 = Color32::from_rgb(22, 22, 24);
+const HEADER: Color32 = Color32::from_rgb(28, 28, 31);
+const LINE: Color32 = Color32::from_rgb(46, 45, 50);
+const HOVER: Color32 = Color32::from_rgb(43, 42, 47);
+const SELECTED_ROW: Color32 = Color32::from_rgb(49, 41, 57);
+pub(super) const SURFACE: Color32 = Color32::from_rgb(35, 34, 39);
+pub(super) const TEXT: Color32 = Color32::from_rgb(236, 235, 239);
+pub(super) const MUTED: Color32 = Color32::from_rgb(157, 154, 164);
+pub(super) const ACCENT: Color32 = Color32::from_rgb(192, 138, 240);
+pub(super) const SELECTION_FILL: Color32 = Color32::from_rgb(84, 56, 109);
+
+pub(super) fn visuals() -> egui::Visuals {
+    let mut visuals = egui::Visuals::dark();
+    visuals.override_text_color = Some(TEXT);
+    visuals.weak_text_color = Some(MUTED);
+    visuals.hyperlink_color = ACCENT;
+    visuals.selection.bg_fill = SELECTION_FILL;
+    visuals.selection.stroke = Stroke::new(1., ACCENT);
+    visuals.text_cursor.stroke.color = ACCENT;
+    visuals.ime_composition.active_underline_stroke.color = ACCENT;
+    visuals.ime_composition.inactive_underline_stroke.color = MUTED;
+    visuals.panel_fill = BG;
+    visuals.window_fill = HEADER;
+    visuals.window_stroke = Stroke::new(1., LINE);
+    visuals.code_bg_color = SURFACE;
+    visuals.widgets.inactive.bg_fill = SURFACE;
+    visuals.widgets.inactive.weak_bg_fill = SURFACE;
+    visuals.widgets.hovered.bg_fill = HOVER;
+    visuals.widgets.hovered.weak_bg_fill = HOVER;
+    visuals.widgets.active.bg_fill = SELECTED_ROW;
+    visuals.widgets.active.weak_bg_fill = SELECTED_ROW;
+    visuals.widgets.active.bg_stroke.color = ACCENT;
+    visuals.widgets.open.bg_fill = SELECTED_ROW;
+    visuals.widgets.open.weak_bg_fill = SELECTED_ROW;
+    visuals
+}
 
 fn key(ui: &mut egui::Ui, text: &str) {
     Frame::new()
-        .fill(Color32::from_rgb(44, 46, 49))
+        .fill(HOVER)
         .corner_radius(4)
         .inner_margin(Margin::symmetric(6, 3))
         .show(ui, |ui| {
             ui.label(
                 RichText::new(text)
                     .size(11.)
-                    .color(Color32::from_rgb(191, 194, 200)),
+                    .color(MUTED),
             );
         });
 }
@@ -27,9 +57,6 @@ fn key(ui: &mut egui::Ui, text: &str) {
 impl App {
     pub(super) fn draw_window(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        ui.style_mut().visuals.override_text_color = Some(TEXT);
-        ui.style_mut().visuals.selection.bg_fill = Color32::from_rgb(57, 91, 99);
-        ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::from_rgb(34, 36, 39);
         ui.style_mut().spacing.item_spacing = Vec2::new(8., 6.);
         let outer = ui.max_rect().shrink(1.);
         ui.painter().rect_filled(outer, 12, BG);
@@ -53,16 +80,13 @@ impl App {
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     let (icon, _) = ui.allocate_exact_size(Vec2::splat(28.), Sense::hover());
-                    let center = icon.center();
-                    ui.painter().circle_stroke(
-                        center - Vec2::splat(3.),
-                        7.,
-                        Stroke::new(2., ACCENT),
-                    );
-                    ui.painter().line_segment(
-                        [center + Vec2::splat(2.), center + Vec2::splat(10.)],
-                        Stroke::new(2., ACCENT),
-                    );
+                    let center = icon.center() - Vec2::splat(2.5);
+                    let tip = center + Vec2::splat(10.5);
+                    let stroke = Stroke::new(2.25, ACCENT);
+                    let painter = ui.painter();
+                    painter.line_segment([center + Vec2::splat(5.), tip], stroke);
+                    painter.circle_filled(tip, stroke.width / 2., ACCENT);
+                    painter.circle_stroke(center, 7.25, stroke);
                     ui.add_space(8.);
                     if self.settings {
                         ui.label(RichText::new("Settings").size(21.).color(TEXT));
@@ -293,12 +317,15 @@ impl App {
                                 ui.painter().rect_filled(
                                     rect,
                                     6,
-                                    if selected {
-                                        Color32::from_rgb(41, 44, 48)
-                                    } else {
-                                        Color32::from_rgb(32, 34, 37)
-                                    },
+                                    if selected { SELECTED_ROW } else { HOVER },
                                 );
+                            }
+                            if selected {
+                                let marker = egui::Rect::from_center_size(
+                                    rect.left_center() + Vec2::new(4., 0.),
+                                    Vec2::new(2., 20.),
+                                );
+                                ui.painter().rect_filled(marker, 1, ACCENT);
                             }
                             let icon = egui::Rect::from_min_size(
                                 rect.min + Vec2::new(14., 18.),
@@ -344,7 +371,7 @@ impl App {
                                     .truncate().sense(Sense::hover()),
                             );
                             if let Some(snippet) = &hit.snippet {
-                                row_ui.add(egui::Label::new(RichText::new(snippet).size(12.).color(ACCENT)).truncate().sense(Sense::hover()));
+                                row_ui.add(egui::Label::new(RichText::new(snippet).size(12.).color(MUTED)).truncate().sense(Sense::hover()));
                             }
                             crate::preview_ui::jira_summary(&mut row_ui, hit, false);
                             crate::preview_ui::gmail_summary(&mut row_ui, hit, false);

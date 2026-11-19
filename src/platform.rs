@@ -8,6 +8,19 @@ use windows_sys::Win32::{
     UI::{HiDpi::*, Input::KeyboardAndMouse::*, WindowsAndMessaging::*},
 };
 
+pub fn set_taskbar_icon(window: isize) {
+    // Resource 1 is the multi-size app icon in app-icon.rc.
+    const APP_ICON_RESOURCE: usize = 1;
+    let window = window as HWND;
+    unsafe {
+        let instance = GetWindowLongPtrW(window, GWLP_HINSTANCE) as _;
+        let icon = LoadIconW(instance, APP_ICON_RESOURCE as *const u16);
+        if !icon.is_null() {
+            SendMessageW(window, WM_SETICON, ICON_BIG as usize, icon as LPARAM);
+        }
+    }
+}
+
 /// Center within the pointer's monitor work area (excluding taskbars).
 /// Physical coordinates also work when a second, not-yet-DPI-aware process summons us.
 pub fn center_window(window: isize) {

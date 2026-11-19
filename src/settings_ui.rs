@@ -503,7 +503,7 @@ impl App {
                 .find(|s| s.id == source.id)
                 .map_or(source.paused, |s| s.paused);
             egui::Frame::new()
-                .fill(Color32::from_rgb(34, 36, 39))
+                .fill(crate::appearance::SURFACE)
                 .corner_radius(6)
                 .inner_margin(12)
                 .show(ui, |ui| {
@@ -716,13 +716,23 @@ fn action_icon(ui: &mut egui::Ui, save: bool, label: &str) -> egui::Response {
     response
 }
 
+fn source_status_color(paused: bool) -> Color32 {
+    if paused {
+        crate::appearance::MUTED
+    } else {
+        crate::appearance::ACCENT
+    }
+}
+
 fn status_icon(paused: bool) -> egui::Image<'static> {
     let (uri, svg): (&str, &[u8]) = if paused {
-        ("bytes://status/paused.svg", br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M6 4v12M14 4v12" stroke="#f0be64" stroke-width="3"/></svg>"##)
+        ("bytes://status/paused.svg", br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M6 4v12M14 4v12" stroke="white" stroke-width="3"/></svg>"##)
     } else {
-        ("bytes://status/enabled.svg", br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M5 3l12 7-12 7z" fill="#78c3cc"/></svg>"##)
+        ("bytes://status/enabled.svg", br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M5 3l12 7-12 7z" fill="white"/></svg>"##)
     };
-    egui::Image::from_bytes(uri, svg).fit_to_exact_size(egui::vec2(20., 20.))
+    egui::Image::from_bytes(uri, svg)
+        .tint(source_status_color(paused))
+        .fit_to_exact_size(egui::vec2(20., 20.))
 }
 
 fn source_status_card(
@@ -732,13 +742,9 @@ fn source_status_card(
     saved_paused: Option<bool>,
 ) {
     let paused = saved_paused.unwrap_or(*draft_paused);
-    let color = if paused {
-        Color32::from_rgb(240, 190, 100)
-    } else {
-        Color32::from_rgb(120, 195, 204)
-    };
+    let color = source_status_color(paused);
     egui::Frame::new()
-        .fill(Color32::from_rgb(34, 36, 39))
+        .fill(crate::appearance::SURFACE)
         .corner_radius(6)
         .inner_margin(12)
         .show(ui, |ui| {

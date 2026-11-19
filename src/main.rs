@@ -20,6 +20,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+const APP_ICON: &[u8] = include_bytes!("../not-bad-search-icon.png");
+
 enum Event {
     SemanticResults(u64, String, std::result::Result<Vec<Hit>, String>, Duration),
     SemanticStatus(String, bool, bool),
@@ -191,10 +193,12 @@ fn run() -> Result<()> {
     config.validate()?;
     let db_path = data.join("index.sqlite");
     open_db(&db_path)?;
+    let icon = eframe::icon_data::from_png_bytes(APP_ICON).context("Decode app icon")?;
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Glow,
         viewport: egui::ViewportBuilder::default()
             .with_title("Not Bad Search")
+            .with_icon(icon)
             .with_decorations(false)
             .with_transparent(true)
             .with_inner_size([1014., 650.])
@@ -212,7 +216,7 @@ fn run() -> Result<()> {
         fonts.families.entry(egui::FontFamily::Monospace).or_default().push("DM Sans".into());
         not_bad_search::slack_display::add_emoji_font(&mut fonts);
         cc.egui_ctx.set_fonts(fonts);
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        cc.egui_ctx.set_visuals(appearance::visuals());
         egui_extras::install_image_loaders(&cc.egui_ctx);
         let (tx,events)=mpsc::channel();
         let pending=Arc::new(Mutex::new(None::<(u64,String,SearchFilters)>));
@@ -277,6 +281,7 @@ fn run() -> Result<()> {
             }
         });
         let window=match cc.window_handle()?.as_raw() {RawWindowHandle::Win32(h)=>h.hwnd.get(),_=>return Err("Windows window handle unavailable".into())};
+        platform::set_taskbar_icon(window);
         instance.attach(window)?;
         platform::center_window(window);
         let (hotkey,error)=match platform::Hotkey::register(cc.egui_ctx.clone(),window) {Ok(h)=>(Some(h),String::new()),Err(e)=>(None,e.to_string())};
