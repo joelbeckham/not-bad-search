@@ -10,4 +10,4 @@ A Windows 11 search launcher with keyword and semantic search across a local ind
 
 Add sources in **Settings**, then press **Ctrl+Alt+Space** to open search.
 
-![Not Bad Search finding a sample chocolate cake recipe for “baking dessert”](search-screenshot.png)
+![Not Bad Search in its dark theme showing four sample results for chocolate](search-screenshot.png)
