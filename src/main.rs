@@ -7,6 +7,7 @@ mod platform;
 mod preview_ui;
 mod semantic_worker;
 mod settings_ui;
+mod tray;
 use anyhow::{Context, Result};
 use eframe::egui;
 use not_bad_search::{
@@ -15,7 +16,9 @@ use not_bad_search::{
 use notify::Watcher;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::{
+    cell::Cell,
     path::PathBuf,
+    rc::Rc,
     sync::{mpsc, Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -90,6 +93,8 @@ struct App {
     index_wake: mpsc::SyncSender<()>,
     shared_config: Arc<Mutex<Config>>,
     _hotkey: Option<platform::Hotkey>,
+    tray: Option<tray::Tray>,
+    quit_requested: Rc<Cell<bool>>,
     focus: bool,
 }
 
@@ -284,8 +289,19 @@ fn run() -> Result<()> {
         platform::set_taskbar_icon(window);
         instance.attach(window)?;
         platform::center_window(window);
-        let (hotkey,error)=match platform::Hotkey::register(cc.egui_ctx.clone(),window) {Ok(h)=>(Some(h),String::new()),Err(e)=>(None,e.to_string())};
-        Ok(Box::new(App {remote_wake,source_settings:settings_ui::State::default(),background_refresh:false,index_error:String::new(),filters:SearchFilters::default(),source_selection:Default::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:not_bad_search::credentials::load().ok().flatten().is_some(),settings:config.sources.is_empty(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,selection_started:false,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,focus:true}))
+        let (hotkey, mut error)=match platform::Hotkey::register(cc.egui_ctx.clone(),window) {Ok(h)=>(Some(h),String::new()),Err(e)=>(None,e.to_string())};
+        let quit_requested = Rc::new(Cell::new(false));
+        let tray = match tray::Tray::register(window, cc.egui_ctx.clone(), quit_requested.clone()) {
+            Ok(tray) => Some(tray),
+            Err(err) => {
+                if !error.is_empty() {
+                    error.push('\n');
+                }
+                error.push_str(&err.to_string());
+                None
+            }
+        };
+        Ok(Box::new(App {remote_wake,source_settings:settings_ui::State::default(),background_refresh:false,index_error:String::new(),filters:SearchFilters::default(),source_selection:Default::default(),semantic,semantic_status:String::new(),semantic_ready:false,semantic_due:None,semantic_pending:false,semantic_hits:None,lexical_hits:vec![],preview:None,preview_loader:None,inspector:None,_instance:instance,completed_generation:0,submitted_query:String::new(),searching:false,query_error:None,trace_results:false,image_status:String::new(),image_wake,api_key_input:String::new(),key_saved:not_bad_search::credentials::load().ok().flatten().is_some(),settings:config.sources.is_empty(), content_limit_mib:config.max_content_bytes.div_ceil(1024*1024), config,config_path,query:String::new(),hits:vec![],selected:0,selection_started:false,generation:0,elapsed:Duration::ZERO,pending,wake,events,status:"Starting…".into(),error,index_wake,shared_config,_hotkey:hotkey,tray,quit_requested,focus:true}))
     })).map_err(|e|anyhow::anyhow!(e.to_string()))?;
     Ok(())
 }
@@ -437,7 +453,15 @@ impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         [0.0; 4]
     }
-    fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.input(|i| i.viewport().close_requested())
+            && !self.quit_requested.get()
+            && (self._hotkey.is_some() || self.tray.is_some())
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            self.focus = true;
+        }
         while let Ok(event) = self.events.try_recv() {
             match event {
                 Event::Results(id, query, hits, time)
@@ -564,11 +588,6 @@ impl eframe::App for App {
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        if ctx.input(|i| i.viewport().close_requested()) && self._hotkey.is_some() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-            self.focus = true;
-        }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Comma)) {
             self.settings = true;
             self.focus = false;

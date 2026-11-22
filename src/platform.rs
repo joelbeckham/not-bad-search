@@ -8,13 +8,19 @@ use windows_sys::Win32::{
     UI::{HiDpi::*, Input::KeyboardAndMouse::*, WindowsAndMessaging::*},
 };
 
-pub fn set_taskbar_icon(window: isize) {
+pub fn app_icon(window: HWND) -> HICON {
     // Resource 1 is the multi-size app icon in app-icon.rc.
     const APP_ICON_RESOURCE: usize = 1;
-    let window = window as HWND;
     unsafe {
         let instance = GetWindowLongPtrW(window, GWLP_HINSTANCE) as _;
-        let icon = LoadIconW(instance, APP_ICON_RESOURCE as *const u16);
+        LoadIconW(instance, APP_ICON_RESOURCE as *const u16)
+    }
+}
+
+pub fn set_taskbar_icon(window: isize) {
+    let window = window as HWND;
+    let icon = app_icon(window);
+    unsafe {
         if !icon.is_null() {
             SendMessageW(window, WM_SETICON, ICON_BIG as usize, icon as LPARAM);
         }

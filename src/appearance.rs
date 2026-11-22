@@ -173,7 +173,8 @@ impl App {
                                 .frame(false),
                         );
                         if response.clicked() || text_response.clicked() {
-                            std::process::exit(0);
+                            self.quit_requested.set(true);
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     } else if ui
                         .add(
